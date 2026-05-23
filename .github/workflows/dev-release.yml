@@ -1,15 +1,26 @@
-name: Dev Release
+name: Dev Release (auto patch bump)
 
-# main push 毎に `dev-N` tag を自動採番 + GitHub Release (prerelease) を
-# 作成する。 ci-workflows/dev-tag-release.yml の Mode B (create_release:
-# true) を使い、 PAT 不要 + GITHUB_TOKEN だけで完結。
+# main push 毎に semver patch を自動 increment して `v{major}.{minor}.{patch}`
+# tag を push する。 ci-workflows/tag-release.yml の Mode A を bump=patch
+# 固定で呼び出す。
 #
-# 「staging = dev で運用、 production は v* tag を別途切る」運用前提
-# (mcp-cf-workers Issue #39 / ippoan/secrets-inventory#39)。 v* tag による
-# 正式 publish は publish.yml に任せる (本 workflow は publish しない)。
+# 流れ:
+#   1. main に src 変更がマージされる
+#   2. 本 workflow が tag-release.yml@main を call、 直近 `v*` tag を見て
+#      patch+1 を計算して push (TAG_RELEASE_PAT 経由)
+#   3. tag push が publish.yml を trigger → `@ippoan/mcp-cf-workers@v{N}` が
+#      GitHub Packages に publish される
 #
-# paths filter で docs / meta only な commit を除外し、 dev tag 番号が
-# 無駄に増えるのを抑える。
+# 命名: ファイル名は dev-release.yml だが、 採番されるのは正規 semver tag
+# (= `v0.0.1`, `v0.0.2`, …)。 `dev-N` counter / npm prerelease は使わない。
+# 「dev channel」= 「main 反映ごとの自動 patch increment」と定義。
+#
+# minor / major bump は別途 release.yml (workflow_dispatch) で手動 — 必要に
+# なったら追加。 現状は patch auto のみで運用。
+#
+# tag-release.yml の skip-if-already-tagged ロジックがあるため、 同一 commit
+# への重複発火は no-op。 paths filter で docs / meta only commit はそもそも
+# trigger しないようにして release ノイズを抑える。
 
 on:
   push:
@@ -25,7 +36,9 @@ permissions:
   contents: write
 
 jobs:
-  dev-release:
-    uses: ippoan/ci-workflows/.github/workflows/dev-tag-release.yml@main
+  release:
+    uses: ippoan/ci-workflows/.github/workflows/tag-release.yml@main
     with:
-      create_release: true
+      bump: patch
+    secrets:
+      TAG_RELEASE_PAT: ${{ secrets.TAG_RELEASE_PAT }}
