@@ -1,26 +1,24 @@
-name: Dev Release (auto patch bump)
+name: Dev Release
 
-# main push 毎に semver patch を自動 increment して `v{major}.{minor}.{patch}`
-# tag を push する。 ci-workflows/tag-release.yml の Mode A を bump=patch
-# 固定で呼び出す。
+# main push 毎に `dev-{major}.{minor}.{patch}` tag を auto patch increment
+# で採番 + push する。 `dev-` prefix + semver の独自フォーマット
+# (ci-workflows reusable では未対応のため inline 実装)。
 #
 # 流れ:
 #   1. main に src 変更がマージされる
-#   2. 本 workflow が tag-release.yml@main を call、 直近 `v*` tag を見て
-#      patch+1 を計算して push (TAG_RELEASE_PAT 経由)
-#   3. tag push が publish.yml を trigger → `@ippoan/mcp-cf-workers@v{N}` が
-#      GitHub Packages に publish される
+#   2. 直近 `dev-*` tag を見て patch+1 を計算
+#   3. TAG_RELEASE_PAT で tag push (GITHUB_TOKEN loop 防止仕様を回避)
+#   4. GitHub Release を prerelease で作成 (`-` 入り tag なので
+#      releases/latest API に出ない = stable consumer 無影響)
 #
-# 命名: ファイル名は dev-release.yml だが、 採番されるのは正規 semver tag
-# (= `v0.0.1`, `v0.0.2`, …)。 `dev-N` counter / npm prerelease は使わない。
-# 「dev channel」= 「main 反映ごとの自動 patch increment」と定義。
+# 初回 (まだ `dev-*` tag が無い状態) → `dev-0.0.2` から開始。
+# その後 patch increment で `dev-0.0.3`, `dev-0.0.4`, …。
 #
-# minor / major bump は別途 release.yml (workflow_dispatch) で手動 — 必要に
-# なったら追加。 現状は patch auto のみで運用。
+# minor / major 昇格は手動 (まだ未実装、 必要時に dispatch caller を追加)。
+# v* tag による正式 publish は publish.yml が別途 trigger される。
 #
-# tag-release.yml の skip-if-already-tagged ロジックがあるため、 同一 commit
-# への重複発火は no-op。 paths filter で docs / meta only commit はそもそも
-# trigger しないようにして release ノイズを抑える。
+# Skip 条件: HEAD が既に `dev-*` tag を持っていれば no-op (workflow 再実行
+# / branch-protection re-evaluation 等で重複発火しても安全)。
 
 on:
   push:
@@ -36,9 +34,82 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    uses: ippoan/ci-workflows/.github/workflows/tag-release.yml@main
-    with:
-      bump: patch
-    secrets:
-      TAG_RELEASE_PAT: ${{ secrets.TAG_RELEASE_PAT }}
+  dev-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.TAG_RELEASE_PAT || github.token }}
+
+      - name: Compute next dev-{semver} tag
+        id: tag
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          # HEAD が既に dev-* tag を持っていれば skip (重複防止)
+          EXISTING=$(git tag --points-at HEAD | grep -E '^dev-[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          if [ -n "$EXISTING" ]; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "existing=$EXISTING" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Dev Release"
+              echo ""
+              echo "Skipped: HEAD already tagged as \`$EXISTING\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # 直近 dev-{semver} を解析して patch+1
+          LATEST=$(git tag -l 'dev-*' | grep -E '^dev-[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          if [ -z "$LATEST" ]; then
+            # 初回は dev-0.0.2 から開始
+            NEW_TAG="dev-0.0.2"
+            PREV="(none)"
+          else
+            CURRENT="${LATEST#dev-}"
+            IFS='.' read -r MAJ MIN PATCH <<< "$CURRENT"
+            NEW_TAG="dev-${MAJ}.${MIN}.$((PATCH + 1))"
+            PREV="$LATEST"
+          fi
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Dev Release"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| previous | \`$PREV\` |"
+            echo "| new | \`$NEW_TAG\` |"
+            echo "| commit | \`$SHORT_SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push tag
+        if: steps.tag.outputs.skipped == 'false'
+        env:
+          NEW_TAG: ${{ steps.tag.outputs.new_tag }}
+          SHORT_SHA: ${{ steps.tag.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_TAG" -m "Dev release ${NEW_TAG} (auto, commit ${SHORT_SHA})"
+          git push origin "$NEW_TAG"
+          echo "Pushed ${NEW_TAG}"
+
+      - name: Create GitHub Release (prerelease)
+        if: steps.tag.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_TAG: ${{ steps.tag.outputs.new_tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$NEW_TAG" \
+            --title "$NEW_TAG" \
+            --generate-notes \
+            --prerelease
