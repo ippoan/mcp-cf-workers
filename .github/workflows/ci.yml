@@ -1,0 +1,26 @@
+name: ci
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+# Required by lib-ci.yml's dual-step auto-merge pattern:
+#   - contents: write       → auto-merge job (queues gh pr merge --squash)
+#   - pull-requests: write  → disable-auto-merge + auto-merge jobs
+#   - packages: read        → @ippoan/* GitHub Packages dep install
+#
+# Omitting any of these triggers `startup_failure` at reusable-parse time
+# (see ci-workflows CLAUDE.md "startup_failure" troubleshoot).
+permissions:
+  contents: write
+  pull-requests: write
+  packages: read
+
+jobs:
+  ci:
+    # NOTE: pinned to the in-flight branch until ci-workflows#PR merges.
+    # Flip back to `@main` after merge.
+    uses: ippoan/ci-workflows/.github/workflows/lib-ci.yml@claude/intelligent-pascal-11ZHO
+    with:
+      node_version: '20'
+    secrets: inherit
