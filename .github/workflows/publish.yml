@@ -7,9 +7,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    # NOTE: pinned to the in-flight branch until ci-workflows#PR merges.
-    # Flip back to `@main` after merge.
-    uses: ippoan/ci-workflows/.github/workflows/lib-publish.yml@claude/intelligent-pascal-11ZHO
+    uses: ippoan/ci-workflows/.github/workflows/lib-publish.yml@main
     with:
       node_version: '20'
     secrets:
