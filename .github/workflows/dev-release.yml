@@ -1,0 +1,31 @@
+name: Dev Release
+
+# main push 毎に `dev-N` tag を自動採番 + GitHub Release (prerelease) を
+# 作成する。 ci-workflows/dev-tag-release.yml の Mode B (create_release:
+# true) を使い、 PAT 不要 + GITHUB_TOKEN だけで完結。
+#
+# 「staging = dev で運用、 production は v* tag を別途切る」運用前提
+# (mcp-cf-workers Issue #39 / ippoan/secrets-inventory#39)。 v* tag による
+# 正式 publish は publish.yml に任せる (本 workflow は publish しない)。
+#
+# paths filter で docs / meta only な commit を除外し、 dev tag 番号が
+# 無駄に増えるのを抑える。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'vitest.config.ts'
+
+permissions:
+  contents: write
+
+jobs:
+  dev-release:
+    uses: ippoan/ci-workflows/.github/workflows/dev-tag-release.yml@main
+    with:
+      create_release: true
