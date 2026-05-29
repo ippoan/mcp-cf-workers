@@ -1,20 +1,31 @@
 name: deploy example echo-do-ws
 
-# Manually-triggered deploy for the Phase 0 hard-gate PoC
-# (examples/echo-do-ws). Not wired into the lib's PR CI — this only runs when a
-# human dispatches it, which is exactly how the gate is exercised:
-#   1. dispatch with build_tag=v1  → connect Claude Code, call echo (→ "v1: …")
-#   2. dispatch again with build_tag=v2 (same live session open)
-#   3. observe whether the client re-fetches tools/list without reconnecting
-# See examples/echo-do-ws/README.md. Refs #6, ippoan/secrets-inventory#70.
+# Deploys the Phase 0 hard-gate PoC (examples/echo-do-ws) to Cloudflare Workers.
+#
+# Auto-deploys on every push to main that touches the example or the lib source
+# it bundles, so the gate's deploy half needs no button-pushing: each merge to
+# main redeploys with BUILD_TAG = commit SHA (a fresh tag), which is exactly the
+# v1→v2 change the gate observes. `workflow_dispatch` stays for ad-hoc deploys
+# with an explicit tag.
+#
+# To exercise the gate: keep a Claude Code session connected to the worker, push
+# anything to main (or dispatch), then check whether `echo` reports the new SHA
+# without reconnecting. See examples/echo-do-ws/README.md.
+# Refs #6, ippoan/secrets-inventory#70.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/echo-do-ws/**'
+      - 'src/**'
+      - '.github/workflows/deploy-example-echo-do-ws.yml'
   workflow_dispatch:
     inputs:
       build_tag:
-        description: 'BUILD_TAG baked into the worker (bump between deploys to exercise the gate)'
+        description: 'BUILD_TAG baked into the worker (defaults to the commit SHA)'
         type: string
-        default: 'v1'
+        default: ''
 
 permissions:
   contents: read
@@ -41,9 +52,10 @@ jobs:
       - name: Deploy to Cloudflare Workers
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # Pass dispatch input via env (never interpolate ${{ }} into the shell)
-          # to avoid command injection.
-          BUILD_TAG: ${{ inputs.build_tag }}
+          # Pass inputs via env (never interpolate ${{ }} into the shell) to
+          # avoid command injection. On push there is no input, so fall back to
+          # the commit SHA — a distinct, visible tag per deploy.
+          BUILD_TAG: ${{ github.event.inputs.build_tag || github.sha }}
         run: |
           npx wrangler deploy --var "BUILD_TAG:${BUILD_TAG}" 2>&1 | tee deploy.log
           url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' deploy.log | head -1)
