@@ -1,5 +1,9 @@
 name = "echo-do-ws"
 main = "src/index.ts"
+# Same account as the other ippoan Workers. Setting this lets wrangler skip the
+# /memberships lookup (which the deploy token isn't scoped for) and authenticate
+# straight to the account with just Workers Scripts:Edit.
+account_id = "24b45709d060d957340180e995f0d373"
 compatibility_date = "2025-05-01"
 compatibility_flags = ["nodejs_compat"]
 # Expose a *.workers.dev URL so the hard-gate runbook can `claude mcp add` it
