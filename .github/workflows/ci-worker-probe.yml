@@ -1,0 +1,90 @@
+name: ci-worker-probe
+
+# CI-as-worker / re-wake PoC (cc-relay #69 follow-up):
+#   trigger → CI が動く → CI が `github-actions[bot]` 名義で comment を打つ
+#   → その comment は購読 session (yhonda-ohishi) とは別 identity なので
+#     harness の self-filter を通過し、subscribe_pr_activity 購読中の CCoW
+#     session を **re-wake** する。
+#
+# このファイルは元 test/wake-ci 版の copy on claude/secrets-inventory-73-comment-orFMh
+# branch。`gh pr comment` が "no pull requests found for branch" で fail する
+# regression を、PR 検索 + 無ければ commit comment への fallback で塞ぐ。
+#
+# trigger 3 経路:
+#   push           : payload = commit message
+#   workflow_dispatch: payload = inputs.msg
+#   issue_comment  : payload = comment body (ChatOps)
+#
+# injection 対策: 外部入力は必ず env: 経由。run に ${{ }} を直書きしない。
+on:
+  push:
+    branches:
+      - test/wake-ci
+      - claude/secrets-inventory-73-comment-orFMh
+  workflow_dispatch:
+    inputs:
+      msg:
+        description: payload to act on
+        type: string
+        default: "dispatch payload"
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  act:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve payload from whichever trigger fired
+        id: payload
+        env:
+          EVENT: ${{ github.event_name }}
+          DISPATCH_MSG: ${{ github.event.inputs.msg }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            workflow_dispatch) payload="$DISPATCH_MSG" ;;
+            push)              payload="$COMMIT_MSG" ;;
+            issue_comment)     payload="$COMMENT_BODY" ;;
+            *)                 payload="(unknown event $EVENT)" ;;
+          esac
+          summary="$(printf '%s' "$payload" | tr '\n' ' ' | cut -c1-120)"
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+          echo "::notice::ci-worker fired by '$EVENT': $summary"
+
+      - name: Act — bot-identity comment (the re-wake bell; no failure)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          SUMMARY: ${{ steps.payload.outputs.summary }}
+        run: |
+          set -euo pipefail
+          body="🤖 ci-worker fired (event=${EVENT}, run ${GITHUB_RUN_ID}) — payload: \`${SUMMARY}\`"
+
+          if [ "$EVENT" = "issue_comment" ]; then
+            gh issue comment "$ISSUE_NUM" --repo "$REPO" --body "$body"
+            exit 0
+          fi
+
+          # push / workflow_dispatch: prefer commenting on the open PR for this branch,
+          # fall back to a commit comment if no PR is open (so the workflow stays green
+          # and the wake-bell still rings on the HEAD commit).
+          PR_NUM="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+                      --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          if [ -n "${PR_NUM:-}" ]; then
+            echo "::notice::commenting on PR #${PR_NUM}"
+            gh pr comment "$PR_NUM" --repo "$REPO" --body "$body"
+          else
+            echo "::notice::no open PR for branch '${BRANCH}', falling back to commit comment on ${SHA}"
+            gh api "repos/${REPO}/commits/${SHA}/comments" -f body="$body" >/dev/null
+          fi
