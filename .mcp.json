@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "echo-do-ws": {
+      "type": "http",
+      "url": "https://echo-do-ws.m-tama-ramu.workers.dev/mcp"
+    }
+  }
+}
