@@ -43,10 +43,15 @@ jobs:
         with:
           node-version: '20'
 
-      # The example depends on the in-repo lib via `file:../..`, so it always
-      # deploys against the merged source (the durable export is not published
-      # to GitHub Packages until a `v*` tag).
-      - name: Install
+      # The example depends on the in-repo lib via `file:../..` (a symlink to the
+      # repo root). esbuild resolves the lib's own imports (@modelcontextprotocol
+      # /sdk, agents) relative to the root, so the root devDependencies must be
+      # installed too — not just the example's.
+      - name: Install lib deps (root)
+        working-directory: .
+        run: npm install --no-audit --no-fund
+
+      - name: Install example deps
         run: npm install --no-audit --no-fund
 
       - name: Deploy to Cloudflare Workers
