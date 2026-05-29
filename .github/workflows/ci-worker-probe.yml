@@ -15,7 +15,9 @@ name: ci-worker-probe
 # injection 対策: 外部入力は必ず env: 経由。run に ${{ }} を直書きしない。
 on:
   push:
-    branches: [test/wake-ci]
+    branches:
+      - test/wake-ci
+      - claude/secrets-inventory-73-comment-orFMh
   workflow_dispatch:
     inputs:
       msg:
@@ -26,7 +28,7 @@ on:
     types: [created]
 
 permissions:
-  contents: read
+  contents: write
   issues: write
   pull-requests: write
 
@@ -60,13 +62,26 @@ jobs:
           EVENT: ${{ github.event_name }}
           ISSUE_NUM: ${{ github.event.issue.number }}
           BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
           SUMMARY: ${{ steps.payload.outputs.summary }}
         run: |
           set -euo pipefail
           body="🤖 ci-worker fired (event=${EVENT}, run ${GITHUB_RUN_ID}) — payload: \`${SUMMARY}\`"
+
           if [ "$EVENT" = "issue_comment" ]; then
             gh issue comment "$ISSUE_NUM" --repo "$REPO" --body "$body"
+            exit 0
+          fi
+
+          # push / workflow_dispatch: prefer commenting on the open PR for this branch,
+          # fall back to a commit comment if no PR is open (so the workflow stays green
+          # and the wake-bell still rings on the HEAD commit).
+          PR_NUM="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+                      --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          if [ -n "${PR_NUM:-}" ]; then
+            echo "::notice::commenting on PR #${PR_NUM}"
+            gh pr comment "$PR_NUM" --repo "$REPO" --body "$body"
           else
-            # push / workflow_dispatch: comment on the open PR for this branch.
-            gh pr comment "$BRANCH" --repo "$REPO" --body "$body"
+            echo "::notice::no open PR for branch '${BRANCH}', falling back to commit comment on ${SHA}"
+            gh api "repos/${REPO}/commits/${SHA}/comments" -f body="$body" >/dev/null
           fi
