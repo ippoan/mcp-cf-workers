@@ -17,6 +17,7 @@ name: Dev Release
 # npm publish 連鎖は別途 — publish.yml は引き続き `v*` tag のみ trigger。
 
 on:
+  # main への src 変更で自動採番 (通常フロー)。
   push:
     branches: [main]
     paths:
@@ -25,6 +26,9 @@ on:
       - 'package.json'
       - 'tsconfig.json'
       - 'vitest.config.ts'
+  # src を変えない release (初回 publish / workflow 変更後の publish 起こし) を
+  # version 詐称コミット無しで切れるよう、手動 dispatch も許可する。
+  workflow_dispatch:
 
 permissions:
   contents: write
