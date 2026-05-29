@@ -58,7 +58,7 @@ jobs:
           echo "summary=$summary" >> "$GITHUB_OUTPUT"
           echo "::notice::ci-worker fired by '$EVENT': $summary"
 
-      - name: Act — bot-identity comment (the re-wake bell; no failure)
+      - name: Act — bot-identity comment (wake-bell, auto-deletes after 60s)
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -69,22 +69,51 @@ jobs:
           SUMMARY: ${{ steps.payload.outputs.summary }}
         run: |
           set -euo pipefail
-          body="🤖 ci-worker fired (event=${EVENT}, run ${GITHUB_RUN_ID}) — payload: \`${SUMMARY}\`"
+          body="🤖 ci-worker fired (event=${EVENT}, run ${GITHUB_RUN_ID}) — payload: \`${SUMMARY}\` _(auto-deletes in 60s)_"
+
+          # Post the wake-bell via `gh api` so we capture the comment id, then
+          # sleep 60s and delete it. The wake itself is delivered by the webhook
+          # at post time; the comment body in the PR / commit is only noise once
+          # subscribing sessions have been woken.
+          KIND=""       # "issue" or "commit"
+          COMMENT_ID=""
+
+          post_issue_comment () {
+            local target_num="$1"
+            local resp
+            resp="$(gh api "repos/${REPO}/issues/${target_num}/comments" -f body="$body")"
+            COMMENT_ID="$(printf '%s' "$resp" | jq -r '.id')"
+            KIND="issue"
+          }
+          post_commit_comment () {
+            local resp
+            resp="$(gh api "repos/${REPO}/commits/${SHA}/comments" -f body="$body")"
+            COMMENT_ID="$(printf '%s' "$resp" | jq -r '.id')"
+            KIND="commit"
+          }
 
           if [ "$EVENT" = "issue_comment" ]; then
-            gh issue comment "$ISSUE_NUM" --repo "$REPO" --body "$body"
-            exit 0
+            post_issue_comment "$ISSUE_NUM"
+          else
+            # push / workflow_dispatch: prefer the open PR for this branch,
+            # fall back to a commit comment if no PR exists.
+            PR_NUM="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+                        --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+            if [ -n "${PR_NUM:-}" ]; then
+              echo "::notice::commenting on PR #${PR_NUM}"
+              post_issue_comment "$PR_NUM"
+            else
+              echo "::notice::no open PR for branch '${BRANCH}', falling back to commit comment on ${SHA}"
+              post_commit_comment
+            fi
           fi
 
-          # push / workflow_dispatch: prefer commenting on the open PR for this branch,
-          # fall back to a commit comment if no PR is open (so the workflow stays green
-          # and the wake-bell still rings on the HEAD commit).
-          PR_NUM="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
-                      --json number --jq '.[0].number // empty' 2>/dev/null || true)"
-          if [ -n "${PR_NUM:-}" ]; then
-            echo "::notice::commenting on PR #${PR_NUM}"
-            gh pr comment "$PR_NUM" --repo "$REPO" --body "$body"
+          echo "::notice::posted ${KIND} comment id=${COMMENT_ID}, sleeping 60s before delete"
+          sleep 60
+
+          if [ "$KIND" = "issue" ]; then
+            gh api -X DELETE "repos/${REPO}/issues/comments/${COMMENT_ID}" >/dev/null
           else
-            echo "::notice::no open PR for branch '${BRANCH}', falling back to commit comment on ${SHA}"
-            gh api "repos/${REPO}/commits/${SHA}/comments" -f body="$body" >/dev/null
+            gh api -X DELETE "repos/${REPO}/comments/${COMMENT_ID}" >/dev/null
           fi
+          echo "::notice::deleted ${KIND} comment id=${COMMENT_ID}"
