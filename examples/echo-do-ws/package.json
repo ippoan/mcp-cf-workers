@@ -8,7 +8,7 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@ippoan/mcp-cf-workers": "*",
+    "@ippoan/mcp-cf-workers": "file:../..",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "agents": "^0.13.0",
     "zod": "^4.0.0"
