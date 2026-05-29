@@ -1,9 +1,25 @@
 name: publish
+
+# 2 channel publish to GitHub Packages (@ippoan scope):
+#
+#   v*    tag → stable。package.json の version をそのまま `latest` dist-tag で publish。
+#   dev-* tag → prerelease。`dev-release.yml` が main push 毎に採番する `dev-X.Y.Z`
+#               tag で発火し、`<base>-dev.X.Y.Z` version を `dev` dist-tag で publish。
+#               consumer は `"@ippoan/mcp-cf-workers": "dev"` で取得できる。
+#
+# dev は tag ごとに version が一意になる (= 再 publish 衝突しない) よう、tag から
+# prerelease suffix を導出してから publish する。stable は reusable lib-publish.yml
+# をそのまま使う。
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+      - 'dev-*'
+
 jobs:
-  publish:
+  # stable (v*): reusable workflow で typecheck/test → npm publish (latest)
+  publish-stable:
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       packages: write
@@ -12,3 +28,42 @@ jobs:
       node_version: '20'
     secrets:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # dev (dev-*): prerelease version を tag から導出して `dev` dist-tag で publish。
+  # reusable は version 上書きを持たないため inline で実行する。
+  publish-dev:
+    if: startsWith(github.ref, 'refs/tags/dev-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@ippoan'
+      - name: Install
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Derive prerelease version from tag
+        run: |
+          set -euo pipefail
+          # dev-0.0.2 → 0.0.2
+          suffix="${GITHUB_REF_NAME#dev-}"
+          base="$(node -p "require('./package.json').version")"
+          npm version "${base}-dev.${suffix}" --no-git-tag-version
+      - name: Publish (dev dist-tag)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish --tag dev
