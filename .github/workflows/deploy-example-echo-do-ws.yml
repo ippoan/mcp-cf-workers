@@ -1,0 +1,57 @@
+name: deploy example echo-do-ws
+
+# Manually-triggered deploy for the Phase 0 hard-gate PoC
+# (examples/echo-do-ws). Not wired into the lib's PR CI — this only runs when a
+# human dispatches it, which is exactly how the gate is exercised:
+#   1. dispatch with build_tag=v1  → connect Claude Code, call echo (→ "v1: …")
+#   2. dispatch again with build_tag=v2 (same live session open)
+#   3. observe whether the client re-fetches tools/list without reconnecting
+# See examples/echo-do-ws/README.md. Refs #6, ippoan/secrets-inventory#70.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_tag:
+        description: 'BUILD_TAG baked into the worker (bump between deploys to exercise the gate)'
+        type: string
+        default: 'v1'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/echo-do-ws
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The example depends on the in-repo lib via `file:../..`, so it always
+      # deploys against the merged source (the durable export is not published
+      # to GitHub Packages until a `v*` tag).
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Deploy to Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Pass dispatch input via env (never interpolate ${{ }} into the shell)
+          # to avoid command injection.
+          BUILD_TAG: ${{ inputs.build_tag }}
+        run: |
+          npx wrangler deploy --var "BUILD_TAG:${BUILD_TAG}" 2>&1 | tee deploy.log
+          url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          {
+            echo "### echo-do-ws deployed"
+            echo ""
+            echo "- BUILD_TAG: \`${BUILD_TAG}\`"
+            echo "- MCP endpoint: \`${url}/mcp\`"
+            echo ""
+            echo "Connect: \`claude mcp add --transport http echo-do-ws ${url}/mcp\`"
+          } >> "$GITHUB_STEP_SUMMARY"

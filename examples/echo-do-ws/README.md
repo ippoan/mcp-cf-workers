@@ -23,6 +23,15 @@ manual reconnect is required).
 
 ## Deploy
 
+### Option A — GitHub Actions (no local Cloudflare creds needed)
+
+Run the **`deploy example echo-do-ws`** workflow (Actions tab → Run workflow)
+with a `build_tag` input (default `v1`). It deploys using the repo's
+`CLOUDFLARE_API_TOKEN` secret and prints the `…/mcp` endpoint in the run summary.
+To exercise the deploy half of the gate, run it again with `build_tag=v2`.
+
+### Option B — local wrangler
+
 ```sh
 cd examples/echo-do-ws
 npm install
@@ -44,8 +53,9 @@ claude mcp add --transport http echo-do-ws https://echo-do-ws.<subdomain>.worker
 
 1. Start a Claude Code session and run `/mcp` (or list tools). Confirm `echo` /
    `bump_version` are present and `echo` answers with `v1: …`.
-2. **Keep the session open.** Change `BUILD_TAG` to `v2` in `wrangler.toml`
-   (and/or add a new tool), then `npx wrangler deploy`.
+2. **Keep the session open.** Re-deploy with a new tag: re-run the Actions
+   workflow with `build_tag=v2` (Option A), or change `BUILD_TAG` in
+   `wrangler.toml` and `npx wrangler deploy` (Option B).
 3. In the **same** session, call `echo` again.
    - ✅ **Gate passes** if, after the deploy, the client reconnects and `echo`
      now answers `v2: …` (and any newly added tool appears) **without manually

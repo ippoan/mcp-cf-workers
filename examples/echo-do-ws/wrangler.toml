@@ -2,6 +2,9 @@ name = "echo-do-ws"
 main = "src/index.ts"
 compatibility_date = "2025-05-01"
 compatibility_flags = ["nodejs_compat"]
+# Expose a *.workers.dev URL so the hard-gate runbook can `claude mcp add` it
+# without configuring a custom route.
+workers_dev = true
 
 # Bump this between deploys (or just redeploy) to observe the deploy → reconnect
 # behavior in a live Claude Code session.
