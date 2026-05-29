@@ -1,23 +1,26 @@
 name: Dev Release
 
-# main push 毎に `dev-{major}.{minor}.{patch}` tag を自動採番 + GitHub
-# Release (prerelease) を作成する。 ci-workflows/tag-release.yml の
-# Mode B (create_release: true) を `version_prefix: ''` + `prefix: 'dev-'`
-# で呼び出し、 tag 形式を `dev-0.0.1`, `dev-0.0.2`, … にする。
+# main push 毎に `dev-{major}.{minor}.{patch}` tag を自動採番 + GitHub Release
+# (prerelease) を作成し、続けて同じ workflow run で GH Packages へ dev prerelease
+# を npm publish する。
 #
-# 流れ:
-#   1. main に src 変更がマージされる
-#   2. tag-release.yml@main が直近 `dev-*` を見て patch+1 を計算
-#   3. GitHub Release を prerelease で作成 (Mode B、 PAT 不要)
+# 流れ (PR を main に merge するだけで完結。手動 dispatch 不要):
+#   1. main に変更がマージされる
+#   2. job `dev-release`: ci-workflows/tag-release.yml@main (Mode B) が直近 `dev-*`
+#      を見て patch+1 した `dev-X.Y.Z` tag を push + prerelease 作成
+#   3. job `publish-dev`: 採番された dev tag から `<base>-dev.X.Y.Z` version を導出し
+#      `dev` dist-tag で GH Packages に publish。consumer は
+#      `"@ippoan/mcp-cf-workers": "dev"` で取得できる。
 #
-# tag-release.yml の Mode B は prefix が non-empty (= 'dev-') の場合
-# `--latest` を付けない仕様なので、 `dev-*` は releases/latest API に
-# 出ない (stable consumer 無影響)。
+# なぜ publish を同 run に同居させるか:
+#   GITHUB_TOKEN で push した tag は別 workflow (publish.yml の tag trigger) を
+#   発火しない GitHub Actions 仕様のため、tag-push driven にできない。よって採番
+#   job と同じ run 内で publish まで行う。stable (`v*`) は publish.yml が担当。
 #
-# npm publish 連鎖は別途 — publish.yml は引き続き `v*` tag のみ trigger。
+# tag-release.yml Mode B は prefix が non-empty (= 'dev-') の場合 `--latest` を
+# 付けない仕様なので、`dev-*` は releases/latest API に出ない (stable consumer 無影響)。
 
 on:
-  # main への src 変更で自動採番 (通常フロー)。
   push:
     branches: [main]
     paths:
@@ -26,18 +29,66 @@ on:
       - 'package.json'
       - 'tsconfig.json'
       - 'vitest.config.ts'
-  # src を変えない release (初回 publish / workflow 変更後の publish 起こし) を
-  # version 詐称コミット無しで切れるよう、手動 dispatch も許可する。
-  workflow_dispatch:
+      # publish ロジック (本 workflow) 自体の変更でも dev release を切り直し、
+      # 変更を即 GH Packages に反映できるようにする。
+      - '.github/workflows/dev-release.yml'
 
 permissions:
   contents: write
 
 jobs:
   dev-release:
+    permissions:
+      contents: write
     uses: ippoan/ci-workflows/.github/workflows/tag-release.yml@main
     with:
       prefix: 'dev-'
       version_prefix: ''
       bump: patch
       create_release: true
+
+  # 採番された dev tag を GH Packages に prerelease publish する。
+  publish-dev:
+    needs: dev-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@ippoan'
+      - name: Install
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Derive dev version from latest dev-* tag
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          # dev-release job が push した最新 dev-* tag (例: dev-0.0.3)。
+          tag="$(git tag -l 'dev-*' --sort=-v:refname | head -1)"
+          if [ -z "$tag" ]; then
+            echo "::error::no dev-* tag found" >&2
+            exit 1
+          fi
+          suffix="${tag#dev-}"
+          base="$(node -p "require('./package.json').version")"
+          npm version "${base}-dev.${suffix}" --no-git-tag-version
+      - name: Publish (dev dist-tag)
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: npm publish --tag dev
