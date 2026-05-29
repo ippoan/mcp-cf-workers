@@ -39,5 +39,18 @@ PR テンプレートは `.github/pull_request_template.md` で `Refs` を強制
   consumer 責任)
 - Hono 依存は optional peer。core (`factory.ts` / `cf-access.ts`) は
   framework-agnostic
-- 公開 API surface を小さく保つ。`./src/index.ts` の named export と
+- 公開 API surface を小さく保つ。`./src/index.ts` / `./src/durable.ts` /
   `./src/auth/index.ts` の named export だけが SemVer 対象
+
+## durable (DO+WS) path の構成 (Refs #6)
+
+- `./durable` export は Cloudflare `agents` SDK の `McpAgent` をそのまま借りた
+  stateful transport。`agents` は **optional peer dep** (durable path 利用時のみ)
+- `agents/mcp` は `cloudflare:workers` を import するため **node (vitest) では
+  読めない**。なので agents 非依存の純粋ロジック (server 構築 =
+  `durable-server.ts` / edge mount 配線 = `durable-mount.ts`) と agents 依存の
+  薄い DO factory (`durable.ts` の `createDurableMcp`) を分離している。前者 2 つは
+  InMemoryTransport / stub で node テスト、後者は `vi.mock("agents/mcp")` で
+  テストする。新ロジックを足す時はこの分離を保つこと
+- `listChanged` capability は `DURABLE_MCP_CAPABILITIES` で single-source。
+  stateless `createWorkerMcp` は push 不可なので listChanged を宣言しない

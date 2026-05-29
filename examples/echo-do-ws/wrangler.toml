@@ -1,0 +1,21 @@
+name = "echo-do-ws"
+main = "src/index.ts"
+compatibility_date = "2025-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Bump this between deploys (or just redeploy) to observe the deploy → reconnect
+# behavior in a live Claude Code session.
+[vars]
+BUILD_TAG = "v1"
+
+# The McpAgent runs inside this Durable Object. mountDurableMcp defaults to the
+# binding name "MCP_OBJECT".
+[[durable_objects.bindings]]
+name = "MCP_OBJECT"
+class_name = "EchoMcp"
+
+# McpAgent persists session state (props, initialize request) in DO SQLite
+# storage, so the class must be registered as a SQLite-backed DO.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["EchoMcp"]

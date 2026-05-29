@@ -1,0 +1,20 @@
+{
+  "name": "echo-do-ws-example",
+  "private": true,
+  "type": "module",
+  "description": "Phase 0 PoC: DO + WebSocket MCP server (deploy→reconnect hard gate).",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@ippoan/mcp-cf-workers": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "agents": "^0.13.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "wrangler": "^4.0.0"
+  }
+}
