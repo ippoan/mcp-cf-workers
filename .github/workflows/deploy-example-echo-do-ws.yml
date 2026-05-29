@@ -57,6 +57,9 @@ jobs:
           # the commit SHA — a distinct, visible tag per deploy.
           BUILD_TAG: ${{ github.event.inputs.build_tag || github.sha }}
         run: |
+          # pipefail so a wrangler failure fails the step (the `| tee` would
+          # otherwise mask wrangler's non-zero exit and report a false green).
+          set -o pipefail
           npx wrangler deploy --var "BUILD_TAG:${BUILD_TAG}" 2>&1 | tee deploy.log
           url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' deploy.log | head -1)
           {
