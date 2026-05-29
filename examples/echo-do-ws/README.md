@@ -1,4 +1,4 @@
-# Phase 0 PoC — echo MCP over DO + WebSocket
+# Phase 0 PoC — echo MCP over DO + WebSocket (Gate A trigger)
 
 Validates the **hard gate** for [ippoan/mcp-cf-workers#6] /
 [ippoan/secrets-inventory#70]:
