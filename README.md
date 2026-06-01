@@ -6,7 +6,7 @@ Thin building blocks for MCP servers on Cloudflare Workers.
 `packages/rotate-mcp` / `ippoan/ci-dashboard`) で重複していた MCP server
 boilerplate を共通化する薄い lib。`@modelcontextprotocol/sdk` 同梱の
 `WebStandardStreamableHTTPServerTransport` をそのまま使い、Workers entry
-point への wiring と CF Access JWT 検証 helper だけを提供する。
+point への wiring と JWT 検証 helper (CF Access RS256 / MCP-JWT HS256) だけを提供する。
 
 ## Install
 
@@ -139,6 +139,35 @@ const claims = await verifyCfAccessJwt(request, {
   audience: env.CF_ACCESS_AUD,
 });
 ```
+
+### HS256 MCP-JWT verification
+
+CF Access の対になる、machine-to-machine 用の HS256 bearer-JWT helper。
+`auth-worker` が mint し `ref-files-worker` が `/v1/*` で検証している
+MCP-JWT (`MCP_JWT_SECRET` を共有, claim `sub` / `github_login` / `scope`)
+を、共通 lib 経由で `/mcp` endpoint の前段にも置けるようにする。
+
+```ts
+import { mcpJwtMiddleware } from "@ippoan/mcp-cf-workers/auth/mcp-jwt-hono";
+
+type Env = { MCP_JWT_SECRET: string; MCP_JWT_AUDIENCE: string };
+
+const app = new Hono<{ Bindings: Env; Variables: { mcpJwt: McpJwtClaims } }>();
+app.use("/mcp", mcpJwtMiddleware());
+app.all("/mcp", async (c) => {
+  const { github_login } = c.get("mcpJwt"); // verified claims
+  return mcp(c.req.raw, c.env);
+});
+```
+
+framework-agnostic な `verifyMcpJwt(request, { secret, audience })` も
+`@ippoan/mcp-cf-workers/auth/mcp-jwt` から使える。`jose.jwtVerify` を
+`algorithms: ["HS256"]` で pin し、`aud` / `exp` / `nbf` を検証、HMAC は
+constant-time 比較 (jose 内部)。失敗時は `McpJwtError` (coarse `reason`)。
+
+CF Access (RS256 / 人間 / SSO) と HS256 (machine-to-machine / 共有秘密) は
+排他ではなく、surface ごとに使い分ける (= `ref-files-worker` は `/ui/*` に
+CF Access、`/mcp` + `/v1/*` に HS256)。
 
 ## Design
 
