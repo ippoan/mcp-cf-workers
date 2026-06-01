@@ -1,6 +1,6 @@
 {
   "name": "@ippoan/mcp-cf-workers",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Thin building blocks for MCP servers on Cloudflare Workers.",
   "type": "module",
   "main": "./src/index.ts",
@@ -9,7 +9,9 @@
     "./durable": "./src/durable.ts",
     "./auth": "./src/auth/index.ts",
     "./auth/cf-access": "./src/auth/cf-access.ts",
-    "./auth/cf-access-hono": "./src/auth/cf-access-hono.ts"
+    "./auth/cf-access-hono": "./src/auth/cf-access-hono.ts",
+    "./auth/mcp-jwt": "./src/auth/mcp-jwt.ts",
+    "./auth/mcp-jwt-hono": "./src/auth/mcp-jwt-hono.ts"
   },
   "files": [
     "src",
