@@ -114,7 +114,12 @@ export class CfAccessClient {
       if (body !== undefined) {
         init.body = JSON.stringify(body);
       }
-      resp = await this.fetchImpl(`${this.accountBase}${path}`, init);
+      // global `fetch` は receiver が globalThis でないと Workers で "Illegal
+      // invocation" になる。`this.fetchImpl(...)` だと receiver が CfApiClient
+      // インスタンスになり落ちるので、bare local に取り出して receiver を外す
+      // (binding-jwt.ts / discovery.ts と同じ呼び方)。
+      const fetchImpl = this.fetchImpl;
+      resp = await fetchImpl(`${this.accountBase}${path}`, init);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new CfApiRequestError(0, [], `CF API fetch failed: ${msg}`);
