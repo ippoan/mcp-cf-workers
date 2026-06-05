@@ -44,11 +44,14 @@ describe("introspectBindingJwt", () => {
   });
 
   it("401 on missing / malformed / empty / wrong-scheme header", async () => {
+    // Bearer 不在/不正は `error="invalid_request"` (= request 形式の問題)。
+    // 動いている ref-files-worker の実 wire と一致させる (Refs #26)。
+    // token が「あるが無効」な場合だけ invalid_token (下の active:false テスト)。
     for (const h of [null, undefined, "", "Basic xyz", "Bearer "]) {
       const err = await introspectBindingJwt(h, env).catch((e) => e);
       expect(err).toBeInstanceOf(BindingJwtError);
       expect(err.status).toBe(401);
-      expect(err.errorCode).toBe("invalid_token");
+      expect(err.errorCode).toBe("invalid_request");
     }
   });
 
@@ -166,6 +169,8 @@ describe("bindingJwtMiddleware (Hono)", () => {
     const wa = res.headers.get("WWW-Authenticate") ?? "";
     expect(wa).toContain("resource_metadata");
     expect(wa).toContain("cf-access-mcp");
+    // parity lock: ref-files-worker と同じく Bearer 不在は error="invalid_request"。
+    expect(wa).toContain('error="invalid_request"');
   });
 
   it("returns 503 (no WWW-Authenticate) when auth-worker is down", async () => {

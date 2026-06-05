@@ -22,7 +22,6 @@
  * 含めて完全削除する点が異なる (PR #37 は protected-resource を残した)。
  */
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import type { Env } from "./env";
 import { bindingJwtMiddleware, type BindingJwtClaims } from "./middleware/binding-jwt";
 
@@ -30,7 +29,12 @@ type Variables = { bindingJwt: BindingJwtClaims };
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-app.use("*", cors());
+// 注意: 以前は `app.use("*", cors())` でグローバルに
+// `access-control-allow-origin: *` を付けていたが、動いている参照
+// (ref-files-worker / ui-preview) は CORS header を **一切付けていない**
+// (curl 実測)。claude.ai connector の OAuth discovery / MCP fetch は server-side
+// で行われ CORS は不要。cf-access-mcp だけが wildcard CORS を出していたのは
+// parity gap なので撤去し、稼働サーバーと wire 一致させる (Refs #26)。
 
 // /healthz は binding_jwt より先に置き、認証なしで疎通確認できるようにする。
 app.get("/healthz", (c) => c.json({ ok: true, service: "cf-access-mcp" }));
@@ -47,5 +51,10 @@ app.all("/mcp", async (c) => {
   const { handleMcp } = await import("./mcp/server");
   return handleMcp(c.req.raw, c.env, c.get("bindingJwt"));
 });
+
+// 未知パスは JSON 404 を返す (ref-files-worker と一致)。Hono default の
+// text/plain `404 Not Found` だと、claude.ai が試しに叩く /.well-known/* で
+// content-type が稼働サーバーと食い違う。parity 維持のため JSON 化 (Refs #26)。
+app.notFound((c) => c.json({ error: "not_found" }, 404));
 
 export default app;
