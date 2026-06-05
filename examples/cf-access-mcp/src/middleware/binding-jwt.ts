@@ -83,12 +83,13 @@ export function wwwAuthenticate(authOrigin: string, error?: string): string {
 function unauthorized(
   c: Context<{ Bindings: Env; Variables: { bindingJwt: BindingJwtClaims } }>,
   authOrigin: string,
-  errorCode: string,
+  errorCode: string | null,
   message: string,
   status: 401 | 503 = 401,
 ): Response {
   if (status === 401) {
-    c.header("WWW-Authenticate", wwwAuthenticate(authOrigin, errorCode));
+    // errorCode が null/undefined なら wwwAuthenticate は error attribute を omit。
+    c.header("WWW-Authenticate", wwwAuthenticate(authOrigin, errorCode ?? undefined));
   }
   return c.json({ error: message }, status);
 }
@@ -110,15 +111,18 @@ export async function introspectBindingJwt(
     options.authWorkerOrigin ?? env.AUTH_WORKER_ORIGIN ?? DEFAULT_AUTH_WORKER_ORIGIN;
 
   if (!authHeader || !authHeader.startsWith(SCHEME_PREFIX)) {
-    throw new BindingJwtError(
-      401,
-      "invalid_token",
-      "missing or malformed Authorization: Bearer header",
-    );
+    // RFC 6750 §3.1: 「request に authentication information が無い」場合は
+    // error code を **omit** すべき。`error=invalid_token` を返すと claude.ai
+    // connector が「token はあるが無効 → user に再 login」と誤解釈し、新規
+    // connector 登録時 (= token を持っていない状態) と矛盾して諦める可能性が
+    // あるため、Bearer header 不在では errorCode = null で WWW-Authenticate
+    // に error 属性を出さない。ref-files-worker も同様に Bearer 無しは
+    // error=invalid_request (= request 形式の問題、token 不正ではない) を返す。
+    throw new BindingJwtError(401, null, "missing or malformed Authorization: Bearer header");
   }
   const token = authHeader.slice(SCHEME_PREFIX.length);
   if (!token) {
-    throw new BindingJwtError(401, "invalid_token", "empty bearer token");
+    throw new BindingJwtError(401, null, "empty bearer token");
   }
 
   const fetchImpl = options.introspectFetch ?? fetch;
@@ -212,7 +216,9 @@ export function bindingJwtMiddleware(
     } catch (err) {
       if (err instanceof BindingJwtError) {
         if (err.status === 401) {
-          return unauthorized(c, authOrigin, err.errorCode ?? "invalid_token", err.message);
+          // errorCode が null なら WWW-Authenticate に error attribute を含めない
+          // (RFC 6750 §3.1: Bearer 不在では error code を出さない)。
+          return unauthorized(c, authOrigin, err.errorCode, err.message);
         }
         return c.json({ error: err.message }, 503);
       }
