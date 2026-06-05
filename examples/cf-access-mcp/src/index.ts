@@ -55,35 +55,25 @@ const protectedResource = (c: Context<AppEnv>) => {
     scopes_supported: ["mcp.read", "mcp.write", "offline_access"],
   });
 };
-const asMetadataProxy = async (c: Context<AppEnv>) => {
-  const upstream = `${c.env.AUTH_WORKER_ORIGIN}/.well-known/oauth-authorization-server`;
-  const resp = await fetch(upstream, {
-    headers: { Accept: "application/json" },
-    cf: { cacheTtl: 60, cacheEverything: true },
-  });
-  if (!resp.ok) {
-    return c.json({ error: "upstream_metadata_fetch_failed", status: resp.status }, 502);
-  }
-  return new Response(resp.body, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "public, max-age=60",
-    },
-  });
-};
+// ⚠ /.well-known/oauth-authorization-server* は **意図的に提供しない** (404 に
+// 任せる)。RFC 8414 §3.3 で AS metadata の `issuer` field は metadata URL host
+// と一致する必要があり、cf-access-mcp.ippoan.org で issuer=auth-staging.ippoan.org
+// を返すと claude.ai connector が "issuer mismatch" で reject する (実証済)。
+//
+// 正しい挙動: claude.ai は protected-resource metadata の `authorization_servers[0]`
+// (= auth-staging.ippoan.org) を見て **auth-staging に直接** AS metadata を fetch
+// する。auth-staging で host されている metadata なら issuer が一致する (RFC 8414 OK)。
+// ref-files-worker も同 pattern (AS metadata を proxy せず、404 のまま)。
 
 // route handler を middleware の前に登録 (Hono は登録順で match)。
-// claude.ai connector は 3 種の path variant で discovery を試みるため全部 200:
-//   1. root: /.well-known/oauth-*
-//   2. MCP URL prefix: /mcp/.well-known/oauth-* (MCP 2025-06-18 spec)
-//   3. root + MCP suffix: /.well-known/oauth-*/mcp (RFC 9728 Section 3)
+// claude.ai connector は 3 種の path variant で protected-resource discovery を
+// 試みるため全部 200:
+//   1. root: /.well-known/oauth-protected-resource
+//   2. MCP URL prefix: /mcp/.well-known/oauth-protected-resource (MCP 2025-06-18 spec)
+//   3. root + MCP suffix: /.well-known/oauth-protected-resource/mcp (RFC 9728 Section 3)
 app.get("/.well-known/oauth-protected-resource", protectedResource);
-app.get("/.well-known/oauth-authorization-server", asMetadataProxy);
 app.get("/mcp/.well-known/oauth-protected-resource", protectedResource);
-app.get("/mcp/.well-known/oauth-authorization-server", asMetadataProxy);
 app.get("/.well-known/oauth-protected-resource/mcp", protectedResource);
-app.get("/.well-known/oauth-authorization-server/mcp", asMetadataProxy);
 
 // /mcp と /mcp/* は auth-worker (`AUTH_WORKER_ORIGIN`) が mint した binding_jwt
 // (Bearer) で認証する。Hono の `/mcp/*` は `/mcp/foo` 以下しかマッチしないため
