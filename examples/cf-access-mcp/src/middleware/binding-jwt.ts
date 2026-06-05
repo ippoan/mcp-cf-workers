@@ -111,18 +111,22 @@ export async function introspectBindingJwt(
     options.authWorkerOrigin ?? env.AUTH_WORKER_ORIGIN ?? DEFAULT_AUTH_WORKER_ORIGIN;
 
   if (!authHeader || !authHeader.startsWith(SCHEME_PREFIX)) {
-    // RFC 6750 §3.1: 「request に authentication information が無い」場合は
-    // error code を **omit** すべき。`error=invalid_token` を返すと claude.ai
-    // connector が「token はあるが無効 → user に再 login」と誤解釈し、新規
-    // connector 登録時 (= token を持っていない状態) と矛盾して諦める可能性が
-    // あるため、Bearer header 不在では errorCode = null で WWW-Authenticate
-    // に error 属性を出さない。ref-files-worker も同様に Bearer 無しは
-    // error=invalid_request (= request 形式の問題、token 不正ではない) を返す。
-    throw new BindingJwtError(401, null, "missing or malformed Authorization: Bearer header");
+    // Bearer header 不在は `error="invalid_request"` を返す (= request 形式の
+    // 問題で、token そのものが無効なわけではない)。
+    //
+    // 注意: PR #41 で「RFC 6750 §3.1 を厳格に読めば authentication information
+    // が無い時は error を omit すべき」と判断して errorCode=null にしたが、これは
+    // **動いている参照 (ref-files-worker) と逆方向**だった。ref-files の実 wire
+    // (curl 実測) は Bearer 不在で
+    //   WWW-Authenticate: Bearer realm="MCP", resource_metadata="...", error="invalid_request"
+    // を送出しており、cf-access-mcp だけが error を落としていた (= parity gap)。
+    // claude.ai connector の挙動を稼働サーバーに完全一致させるため revert する
+    // (Refs #26)。
+    throw new BindingJwtError(401, "invalid_request", "missing or malformed Authorization: Bearer header");
   }
   const token = authHeader.slice(SCHEME_PREFIX.length);
   if (!token) {
-    throw new BindingJwtError(401, null, "empty bearer token");
+    throw new BindingJwtError(401, "invalid_request", "empty bearer token");
   }
 
   const fetchImpl = options.introspectFetch ?? fetch;
@@ -216,8 +220,9 @@ export function bindingJwtMiddleware(
     } catch (err) {
       if (err instanceof BindingJwtError) {
         if (err.status === 401) {
-          // errorCode が null なら WWW-Authenticate に error attribute を含めない
-          // (RFC 6750 §3.1: Bearer 不在では error code を出さない)。
+          // 401 は常に error code を持つ (Bearer 不在/空 = invalid_request、
+          // active:false / aud mismatch = invalid_token)。unauthorized() が
+          // WWW-Authenticate に error 属性を載せる。ref-files と wire 一致。
           return unauthorized(c, authOrigin, err.errorCode, err.message);
         }
         return c.json({ error: err.message }, 503);
