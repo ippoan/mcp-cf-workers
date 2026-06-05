@@ -35,7 +35,9 @@ CF API token は CF Secrets Store binding (`CF_ZEROTRUST_API_TOKEN`) から runt
 
 ## tools
 
-### PR1 (read) — 実装済み
+### read — 実装済み (PR1)
+
+`requiresScope` 無し (binding_jwt が valid なら可)。
 
 | tool | CF endpoint |
 |---|---|
@@ -46,16 +48,39 @@ CF API token は CF Secrets Store binding (`CF_ZEROTRUST_API_TOKEN`) から runt
 | `list_identity_providers` | `GET /access/identity_providers` |
 | `list_access_groups` | `GET /access/groups` |
 
-### PR2+ (write) — 予定
+### write — 実装済み (PR2)
 
-`create_access_policy` / `delete_access_policy` / `create_access_app` /
-`update_access_app` / `delete_access_app` / 高レベル便利 tool `protect_hostname`。
-いずれも `requiresScope: "mcp.write"`。
+いずれも `requiresScope: "mcp.write"` (binding_jwt の scope に `mcp.write` が
+無ければ 403 相当を返す)。scope gating の判定は `mcp/scope.ts` の `isToolAllowed`
+に切り出してある (pure、node でテスト可能)。
+
+| tool | CF endpoint | 備考 |
+|---|---|---|
+| `create_access_policy` | `POST /access/policies` | `allow` (emails/email_domains/everyone) → `include[]` 変換 |
+| `delete_access_policy` | `DELETE /access/policies/{uid}` | |
+| `create_access_app` | `POST /access/apps` | `type:"self_hosted"`、応答に `aud` |
+| `update_access_app` | `PUT /access/apps/{uid}` | CF は full replace |
+| `delete_access_app` | `DELETE /access/apps/{uid}` | |
+| `protect_hostname` | (policy POST → app POST) | 高レベル便利 tool |
+
+```jsonc
+// protect_hostname: 1 発で policy 作成 → self_hosted app 作成
+protect_hostname({
+  hostname: "egov-staging.ippoan.org",
+  allow: { emails: ["m.tama.ramu@gmail.com"] }, // or email_domains / everyone
+  allowed_idps: []                               // 空なら One-time PIN (メール)
+})
+// → { app_uid, aud, policy_id, domain }
+```
+
+これが PR5 で egov-staging を保護する最終 tool。`allow` が空 (どの include も
+生成されない) なら API を一切叩かず error を返す (誤って全公開 app を作らない fail-safe)。
 
 ## ロードマップ (issue #26 の PR 分割)
 
-- **PR1** (この PR): scaffold + read tools + `lib/cf-api.ts` + binding_jwt middleware。CI green。
-- **PR2**: write tools + `protect_hostname`。CF token を Write 権限へ。
+- **PR1** ✅: scaffold + read tools + `lib/cf-api.ts` + binding_jwt middleware。
+- **PR2** ✅ (この PR): write tools + `protect_hostname`。scope gating を `scope.ts`
+  に切り出し。CF token を Write 権限へ。
 - **PR3**: service tokens / IdP / groups の write (secrets-inventory の既存 CF
   service token tool と重複に注意)。
 - **PR4**: auth-worker の `MCP_RESOURCE_ORIGINS_ALLOWLIST` に origin 追加 +
@@ -72,14 +97,15 @@ npm test
 ```
 
 ロジック (`lib/cf-api.ts` の CF REST client、`mcp/tools.ts` の tool 実体、
-`middleware/binding-jwt.ts` の introspect) はすべて fetch / client を引数で差し替え
-可能な pure 関数なので、`vitest` を plain node で回せる (本体 lib と同じ)。
+`mcp/scope.ts` の gating、`middleware/binding-jwt.ts` の introspect) はすべて
+fetch / client を引数で差し替え可能な pure 関数なので、`vitest` を plain node で
+回せる (本体 lib と同じ)。
 
 ## deploy
 
-PR1 時点では deploy はまだ active 化しない (CF token 投入 + custom domain route
-設定が前提)。`wrangler.jsonc` に `cf-access-mcp.ippoan.org` の custom domain と
-secrets store binding を記述済み。
+deploy はまだ active 化しない (CF token 投入 + custom domain route 設定が前提)。
+`wrangler.jsonc` に `cf-access-mcp.ippoan.org` の custom domain と secrets store
+binding を記述済み。
 
 CF API token の投入 (値は context/log に出さず CF Secrets Store + GCP Secret
 Manager へ shell 経由で投入):
@@ -91,8 +117,13 @@ bash ~/.claude/skills/secret-inject/scripts/inject-secret.sh \
 
 必要な CF API token 権限 (account-scoped, account_id = `24b45709d060d957340180e995f0d373`):
 
-- read (PR1): `Access: Apps and Policies Read` + `Access: Organizations, Identity
+- read: `Access: Apps and Policies Read` + `Access: Organizations, Identity
   Providers, and Groups Read`
-- write (PR2+): `Access: Apps and Policies Write`
+- write (PR2 の write tool / `protect_hostname` を実トラフィックで使う場合):
+  `Access: Apps and Policies Write` (apps/policies CRUD)
+
+> PR2 の write tool を実際に叩くには、token を **Write 権限付き**で再投入する
+> (同名 `CF_ZEROTRUST_API_TOKEN` を secret-inject で上書き)。read のみの token の
+> ままだと write tool は CF 側で 403 になる。
 
 投入後に `npx wrangler deploy`。MCP endpoint は `https://cf-access-mcp.ippoan.org/mcp`。

@@ -10,7 +10,7 @@
  *  - CF の共通 envelope (`{ success, errors, messages, result }`) を解いて
  *    `result` だけ返す。`success:false` / 非 2xx は {@link CfApiRequestError}。
  *
- * PR1 は read (`list_*` / `get_*`) のみ。write (create/update/delete) は PR2。
+ * read (`list_*` / `get_*`, PR1) + write (`create` / `update` / `delete`, PR2)。
  */
 
 /** CF API の共通 envelope。 */
@@ -46,6 +46,31 @@ export class CfApiRequestError extends Error {
 /** CF の各リソースは要点だけ型付けし、残りは素通し (read はそのまま JSON で返す)。 */
 export type CfRecord = Record<string, unknown>;
 
+/**
+ * Access policy の include rule (CF の include[] 要素)。allow 系を表現する:
+ * - `email`: 特定アドレスを許可
+ * - `email_domain`: ドメイン全体を許可
+ * - `everyone`: 認証さえ通れば誰でも (IdP 未指定なら One-time PIN)
+ */
+export type AccessInclude =
+  | { email: { email: string } }
+  | { email_domain: { domain: string } }
+  | { everyone: Record<string, never> };
+
+export interface CreateAccessPolicyBody {
+  name: string;
+  decision: string;
+  include: AccessInclude[];
+}
+
+export interface CreateAccessAppBody {
+  name: string;
+  type: string;
+  domain: string;
+  policies?: string[];
+  allowed_idps?: string[];
+}
+
 export interface CfClientOptions {
   /** CF account id。account-scoped base URL の組み立てに使う。 */
   accountId: string;
@@ -71,25 +96,33 @@ export class CfAccessClient {
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
-  /** path は account base からの相対 (例 `/access/apps`)。GET 専用 (read tools)。 */
-  private async request<T>(path: string): Promise<T> {
+  /**
+   * account base 相対 path へ 1 本叩く。`body` を渡すと JSON 化して送る
+   * (POST/PUT)。CF envelope を解いて `result` を返し、`success:false` / 非 2xx /
+   * non-JSON / fetch 失敗は {@link CfApiRequestError}。
+   */
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     let resp: Response;
     try {
-      resp = await this.fetchImpl(`${this.accountBase}${path}`, {
-        method: "GET",
+      const init: RequestInit = {
+        method,
         headers: {
           Authorization: `Bearer ${this.token}`,
           "Content-Type": "application/json",
         },
-      });
+      };
+      if (body !== undefined) {
+        init.body = JSON.stringify(body);
+      }
+      resp = await this.fetchImpl(`${this.accountBase}${path}`, init);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new CfApiRequestError(0, [], `CF API fetch failed: ${msg}`);
     }
 
-    let body: CfEnvelope<T>;
+    let parsed: CfEnvelope<T>;
     try {
-      body = (await resp.json()) as CfEnvelope<T>;
+      parsed = (await resp.json()) as CfEnvelope<T>;
     } catch {
       throw new CfApiRequestError(
         resp.status,
@@ -98,44 +131,71 @@ export class CfAccessClient {
       );
     }
 
-    if (!resp.ok || !body.success) {
-      const errors = Array.isArray(body.errors) ? body.errors : [];
+    if (!resp.ok || !parsed.success) {
+      const errors = Array.isArray(parsed.errors) ? parsed.errors : [];
       const detail =
         errors.map((e) => `${e.code}: ${e.message}`).join("; ") || `HTTP ${resp.status}`;
       throw new CfApiRequestError(resp.status, errors, `CF API error: ${detail}`);
     }
-    return body.result;
+    return parsed.result;
   }
 
   // ----- Access read endpoints (PR1) ---------------------------------------
 
   /** GET /access/apps — Access applications (uid / name / domain / type / aud)。 */
   listAccessApps(): Promise<CfRecord[]> {
-    return this.request<CfRecord[]>("/access/apps");
+    return this.request<CfRecord[]>("GET", "/access/apps");
   }
 
   /** GET /access/apps/{uid} — 単一 Access application。 */
   getAccessApp(uid: string): Promise<CfRecord> {
-    return this.request<CfRecord>(`/access/apps/${encodeURIComponent(uid)}`);
+    return this.request<CfRecord>("GET", `/access/apps/${encodeURIComponent(uid)}`);
   }
 
   /** GET /access/policies — reusable Access policies。 */
   listAccessPolicies(): Promise<CfRecord[]> {
-    return this.request<CfRecord[]>("/access/policies");
+    return this.request<CfRecord[]>("GET", "/access/policies");
   }
 
   /** GET /access/service_tokens — Access service tokens (メタデータのみ)。 */
   listServiceTokens(): Promise<CfRecord[]> {
-    return this.request<CfRecord[]>("/access/service_tokens");
+    return this.request<CfRecord[]>("GET", "/access/service_tokens");
   }
 
   /** GET /access/identity_providers — IdP 一覧 (allowed_idps に使う id)。 */
   listIdentityProviders(): Promise<CfRecord[]> {
-    return this.request<CfRecord[]>("/access/identity_providers");
+    return this.request<CfRecord[]>("GET", "/access/identity_providers");
   }
 
   /** GET /access/groups — Access groups。 */
   listAccessGroups(): Promise<CfRecord[]> {
-    return this.request<CfRecord[]>("/access/groups");
+    return this.request<CfRecord[]>("GET", "/access/groups");
+  }
+
+  // ----- Access write endpoints (PR2) --------------------------------------
+
+  /** POST /access/policies — reusable policy を作成。応答に policy id を含む。 */
+  createAccessPolicy(body: CreateAccessPolicyBody): Promise<CfRecord> {
+    return this.request<CfRecord>("POST", "/access/policies", body);
+  }
+
+  /** DELETE /access/policies/{uid} — reusable policy を削除。 */
+  deleteAccessPolicy(uid: string): Promise<CfRecord> {
+    return this.request<CfRecord>("DELETE", `/access/policies/${encodeURIComponent(uid)}`);
+  }
+
+  /** POST /access/apps — self_hosted app を作成。応答に uid / aud を含む。 */
+  createAccessApp(body: CreateAccessAppBody): Promise<CfRecord> {
+    return this.request<CfRecord>("POST", "/access/apps", body);
+  }
+
+  /** PUT /access/apps/{uid} — app を更新 (CF は full replace)。 */
+  updateAccessApp(uid: string, patch: CfRecord): Promise<CfRecord> {
+    return this.request<CfRecord>("PUT", `/access/apps/${encodeURIComponent(uid)}`, patch);
+  }
+
+  /** DELETE /access/apps/{uid} — app を削除。 */
+  deleteAccessApp(uid: string): Promise<CfRecord> {
+    return this.request<CfRecord>("DELETE", `/access/apps/${encodeURIComponent(uid)}`);
   }
 }
