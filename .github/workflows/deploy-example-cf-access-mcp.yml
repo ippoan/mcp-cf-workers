@@ -1,0 +1,60 @@
+name: deploy example cf-access-mcp
+
+# examples/cf-access-mcp (CF Zero Trust 管理 MCP server) を Cloudflare Workers に
+# deploy する。echo-do-ws と同じ「自前 wrangler deploy」パターン。frontend-ci の
+# secret-verify (wrangler_path) / branch-protection / setup-node lockfile cache の
+# 関門を負わずに済む (= examples の deploy 実績パターンを踏襲)。
+#
+# CF Zero Trust token は CF Secrets Store binding (CF_ZEROTRUST_API_TOKEN) から
+# runtime 取得する。secret は GCP/CF/GitHub の 3 system に投入済なので、wrangler
+# deploy 時に binding が解決される。Refs ippoan/mcp-cf-workers#26.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'examples/cf-access-mcp/**'
+      - 'src/**'
+      - '.github/workflows/deploy-example-cf-access-mcp.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/cf-access-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # example は in-repo lib を file:../.. (root への symlink) で参照する。
+      # esbuild が lib 自身の import (@modelcontextprotocol/sdk 等) を root 相対で
+      # 解決するため、root devDependencies も install する (echo-do-ws と同じ)。
+      - name: Install lib deps (root)
+        working-directory: .
+        run: npm install --no-audit --no-fund
+
+      - name: Install example deps
+        run: npm install --no-audit --no-fund
+
+      - name: Deploy to Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          # pipefail で wrangler の非 0 終了を tee に隠させない (false green 防止)。
+          set -o pipefail
+          npx wrangler deploy 2>&1 | tee deploy.log
+          {
+            echo "### cf-access-mcp deployed"
+            echo ""
+            echo "- MCP endpoint: \`https://cf-access-mcp.ippoan.org/mcp\`"
+            echo "- healthz: \`https://cf-access-mcp.ippoan.org/healthz\`"
+          } >> "$GITHUB_STEP_SUMMARY"
