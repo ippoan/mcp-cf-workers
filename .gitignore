@@ -5,3 +5,7 @@ dist/
 .DS_Store
 .wrangler/
 package-lock.json
+# example worker (cf-access-mcp) は frontend-ci の setup-node (cache: 'npm') が
+# lockfile を要求するため、上の全体除外を negation で例外許可して commit する
+# (lib root は lock を持たない方針のまま)。
+!examples/cf-access-mcp/package-lock.json
