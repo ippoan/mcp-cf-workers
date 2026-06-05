@@ -1,21 +1,11 @@
 name: ci example cf-access-mcp
 
-# examples/cf-access-mcp (CF Zero Trust 管理 MCP server) の CI/CD。
+# examples/cf-access-mcp (CF Zero Trust 管理 MCP server) の typecheck + test。
 #
 # 本体 CI (ci.yml → lib-ci.yml) は repo root の tsconfig/vitest しか見ず
-# examples/ を対象にしないため、example 専用に ci-workflows の frontend-ci.yml
-# (project_type: worker) を caller する。typecheck + test + secret-verify gate
-# 付き deploy を 1 本で回す。Refs ippoan/mcp-cf-workers#26.
-#
-# - working_directory: examples/cf-access-mcp (monorepo subdir)
-# - install_command: example + root (file:../.. の lib 依存解決) を両方 install。
-#   esbuild が @ippoan/mcp-cf-workers 自身の依存 (@modelcontextprotocol/sdk 等) を
-#   root 相対で解決するため (deploy-example-echo-do-ws.yml と同じ理由)。
-# - secret-verify: wrangler の secrets_store_secrets (CF_ZEROTRUST_API_TOKEN) を
-#   deploy 前に GCP Secret Manager で存在検証 (org vars GCP_* で自動稼働、
-#   wrangler_path は working_directory 配下を autodetect)。
-# - deploy: PR (non-draft) で staging、v* tag で release。single-env なので
-#   どちらも素の wrangler deploy (cf-access-mcp.ippoan.org custom domain)。
+# examples/ を対象にしないため、example 専用の workflow をここに置く。deploy は
+# deploy-example-cf-access-mcp.yml (echo-do-ws と同じ自前 wrangler deploy) が担当。
+# Refs ippoan/mcp-cf-workers#26.
 
 on:
   pull_request:
@@ -25,35 +15,39 @@ on:
       - '.github/workflows/ci-example-cf-access-mcp.yml'
   push:
     branches: [main]
-    tags: ['v*']
     paths:
       - 'examples/cf-access-mcp/**'
       - 'src/**'
       - '.github/workflows/ci-example-cf-access-mcp.yml'
 
-# frontend-ci.yml は disable-auto-merge / auto-merge / secret-verify (nested) を
-# 内蔵するため caller に以下が必須 (不足すると startup_failure):
-#   - contents: write / pull-requests: write … auto-merge
-#   - id-token: write                          … secret-verify (GCP WIF)
 permissions:
-  contents: write
-  pull-requests: write
-  packages: read
-  id-token: write
+  contents: read
 
 jobs:
   ci:
-    uses: ippoan/ci-workflows/.github/workflows/frontend-ci.yml@main
-    with:
-      project_type: worker
-      working_directory: examples/cf-access-mcp
-      # setup-node (cache: 'npm') が lockfile を要求するため明示。example の
-      # package-lock.json は root .gitignore の `package-lock.json` を negation で
-      # 例外許可して commit している (lib root は lock を持たない方針のまま)。
-      cache_dependency_path: examples/cf-access-mcp/package-lock.json
-      install_command: 'npm install --no-audit --no-fund && npm install --no-audit --no-fund --prefix ../..'
-      typecheck_command: 'npx tsc --noEmit'
-      has_tests: true
-      deploy_staging_script: 'npx wrangler deploy'
-      deploy_release_script: 'npx wrangler deploy'
-    secrets: inherit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/cf-access-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # example は @ippoan/mcp-cf-workers を file:../.. で参照する。tsc / vitest は
+      # lib の依存 (@modelcontextprotocol/sdk, hono, zod) を root 相対で解決するため
+      # root devDependencies も install する (deploy-example-* と同じ理由)。
+      - name: Install lib deps (root)
+        working-directory: .
+        run: npm install --no-audit --no-fund
+
+      - name: Install example deps
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
