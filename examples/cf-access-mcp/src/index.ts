@@ -43,7 +43,13 @@ app.get("/healthz", (c) => c.json({ ok: true, service: "cf-access-mcp" }));
 const protectedResource = (c: Context<AppEnv>) => {
   const url = new URL(c.req.url);
   return c.json({
-    resource: `${url.origin}/mcp`,
+    // resource は origin only (`<origin>`、suffix 無し)。auth-worker の
+    // per-resource metadata と一致させる (= claude.ai が両者を fetch して
+    // 整合性チェックする際に confused にならない)。auth-worker `audPredicate`
+    // は origin match なので `<origin>` でも `<origin>/mcp` でも accept されるが、
+    // claude.ai 側が authorize で resource parameter を omit する事例があるため、
+    // ref-files-worker と同じ pattern (origin only) に揃える。
+    resource: url.origin,
     authorization_servers: [c.env.AUTH_WORKER_ORIGIN],
     bearer_methods_supported: ["header"],
     scopes_supported: ["mcp.read", "mcp.write", "offline_access"],
@@ -67,11 +73,17 @@ const asMetadataProxy = async (c: Context<AppEnv>) => {
   });
 };
 
-// route handler を middleware の前に登録 (Hono は登録順で match)
+// route handler を middleware の前に登録 (Hono は登録順で match)。
+// claude.ai connector は 3 種の path variant で discovery を試みるため全部 200:
+//   1. root: /.well-known/oauth-*
+//   2. MCP URL prefix: /mcp/.well-known/oauth-* (MCP 2025-06-18 spec)
+//   3. root + MCP suffix: /.well-known/oauth-*/mcp (RFC 9728 Section 3)
 app.get("/.well-known/oauth-protected-resource", protectedResource);
 app.get("/.well-known/oauth-authorization-server", asMetadataProxy);
 app.get("/mcp/.well-known/oauth-protected-resource", protectedResource);
 app.get("/mcp/.well-known/oauth-authorization-server", asMetadataProxy);
+app.get("/.well-known/oauth-protected-resource/mcp", protectedResource);
+app.get("/.well-known/oauth-authorization-server/mcp", asMetadataProxy);
 
 // /mcp と /mcp/* は auth-worker (`AUTH_WORKER_ORIGIN`) が mint した binding_jwt
 // (Bearer) で認証する。Hono の `/mcp/*` は `/mcp/foo` 以下しかマッチしないため
