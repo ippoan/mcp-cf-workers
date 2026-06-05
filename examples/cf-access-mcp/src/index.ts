@@ -43,13 +43,15 @@ app.get("/healthz", (c) => c.json({ ok: true, service: "cf-access-mcp" }));
 const protectedResource = (c: Context<AppEnv>) => {
   const url = new URL(c.req.url);
   return c.json({
-    // resource は origin only (`<origin>`、suffix 無し)。auth-worker の
-    // per-resource metadata と一致させる (= claude.ai が両者を fetch して
-    // 整合性チェックする際に confused にならない)。auth-worker `audPredicate`
-    // は origin match なので `<origin>` でも `<origin>/mcp` でも accept されるが、
-    // claude.ai 側が authorize で resource parameter を omit する事例があるため、
-    // ref-files-worker と同じ pattern (origin only) に揃える。
-    resource: url.origin,
+    // resource は **MCP endpoint URL** (= `<origin>/mcp`、MCP 2025-06-18 spec)。
+    // 過去 PR #36 で `<origin>` (origin only) に変えたが、claude.ai connector は
+    // この resource field を **MCP endpoint URL として解釈**し、根本 `/` に対して
+    // MCP request を投げて 404 を受けるようになった (ofid_2e3cca007bdec77e の log
+    // で実証: GET/POST / の 404 連発)。MCP endpoint suffix `/mcp` を必ず付ける。
+    //
+    // auth-worker の audPredicate は origin 一致 (= `<origin>` で allowlist match)
+    // なので `<origin>/mcp` でも accept される (suffix は origin の一部ではない)。
+    resource: `${url.origin}/mcp`,
     authorization_servers: [c.env.AUTH_WORKER_ORIGIN],
     bearer_methods_supported: ["header"],
     scopes_supported: ["mcp.read", "mcp.write", "offline_access"],
