@@ -1,0 +1,58 @@
+name: ci example cf-access-mcp
+
+# examples/cf-access-mcp (CF Zero Trust 管理 MCP server) の typecheck + test。
+#
+# 本体 CI (ci.yml → lib-ci.yml) は repo root の tsconfig/vitest しか見ず
+# examples/ を対象にしないため、example 専用の workflow をここに置く。echo-do-ws
+# は test を持たないので deploy workflow だけだが、cf-access-mcp は CF REST client
+# 等の pure logic test を持つので PR / main push で回す。
+#
+# deploy は別途 (CF token 投入 + custom domain route 設定が前提)。PR が増えて
+# deploy できる状態になったら echo-do-ws の deploy workflow パターンで step を足す。
+# Refs ippoan/mcp-cf-workers#26.
+
+on:
+  pull_request:
+    paths:
+      - 'examples/cf-access-mcp/**'
+      - 'src/**'
+      - '.github/workflows/ci-example-cf-access-mcp.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'examples/cf-access-mcp/**'
+      - 'src/**'
+      - '.github/workflows/ci-example-cf-access-mcp.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/cf-access-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # example は @ippoan/mcp-cf-workers を file:../.. (repo root への symlink)
+      # で参照する。tsc / vitest は lib の依存 (@modelcontextprotocol/sdk, hono,
+      # zod) を root 相対でも解決するため root devDependencies も install する
+      # (deploy-example-echo-do-ws.yml と同じ理由)。
+      - name: Install lib deps (root)
+        working-directory: .
+        run: npm install --no-audit --no-fund
+
+      - name: Install example deps
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
