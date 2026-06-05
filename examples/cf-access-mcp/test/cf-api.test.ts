@@ -37,6 +37,27 @@ describe("CfAccessClient", () => {
     expect(seenAuth).toBe("Bearer tok-secret");
   });
 
+  it("calls fetch with a detached receiver (no 'this' = Workers Illegal invocation 回帰)", async () => {
+    // global `fetch` を `this.fetchImpl(...)` とメソッド形式で呼ぶと receiver が
+    // CfAccessClient インスタンスになり、Workers 本番で
+    //   "Illegal invocation: function called with incorrect `this` reference"
+    // が出て全 CF API tool が落ちる (Refs #26、protect_hostname 実行時に発覚)。
+    // 修正後は bare local で呼ぶので receiver は undefined。non-arrow fn で `this` を捕捉。
+    let seenThis: unknown = "unset";
+    function recordingFetch(this: unknown): Promise<Response> {
+      seenThis = this;
+      return Promise.resolve(jsonResponse(envelope([])));
+    }
+    const client = new CfAccessClient({
+      accountId: "acct",
+      token: "t",
+      baseUrl: "https://cf.test/client/v4",
+      fetchImpl: recordingFetch as unknown as typeof fetch,
+    });
+    await client.listAccessApps();
+    expect(seenThis).toBeUndefined();
+  });
+
   it("defaults to the official CF base URL", async () => {
     let seenUrl = "";
     const client = new CfAccessClient({
