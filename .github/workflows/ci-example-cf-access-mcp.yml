@@ -47,6 +47,10 @@ jobs:
     with:
       project_type: worker
       working_directory: examples/cf-access-mcp
+      # setup-node (cache: 'npm') が lockfile を要求するため明示。example の
+      # package-lock.json は root .gitignore の `package-lock.json` を negation で
+      # 例外許可して commit している (lib root は lock を持たない方針のまま)。
+      cache_dependency_path: examples/cf-access-mcp/package-lock.json
       install_command: 'npm install --no-audit --no-fund && npm install --no-audit --no-fund --prefix ../..'
       typecheck_command: 'npx tsc --noEmit'
       has_tests: true
