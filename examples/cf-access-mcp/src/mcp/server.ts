@@ -21,7 +21,8 @@ import type { Env } from "../env";
 import type { BindingJwtClaims } from "../middleware/binding-jwt";
 import { CfAccessClient } from "../lib/cf-api";
 import type { ToolEntry } from "./registry";
-import { READ_TOOLS } from "./tools";
+import { ALL_TOOLS } from "./tools";
+import { isToolAllowed, parseScopes } from "./scope";
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -30,12 +31,6 @@ function ok(value: unknown): ToolResult {
 }
 function fail(message: string): ToolResult {
   return { content: [{ type: "text", text: JSON.stringify({ error: message }) }], isError: true };
-}
-
-/** OAuth 慣例の空白区切り scope を Set に。未提供は空 Set (= write tool 不可)。 */
-function parseScopes(raw: string | undefined): Set<string> {
-  if (!raw) return new Set();
-  return new Set(raw.split(/\s+/).filter((s) => s.length > 0));
 }
 
 // McpServer は SDK 内部型なので、ループ登録で cb 型を緩めるために必要な shape
@@ -61,7 +56,7 @@ function registerToolEntry(
     tool.name,
     { description: tool.description, inputSchema: shape },
     async (args: Record<string, unknown>): Promise<ToolResult> => {
-      if (tool.requiresScope && !scopes.has(tool.requiresScope)) {
+      if (!isToolAllowed(tool, scopes)) {
         return fail(
           `forbidden: tool ${tool.name} requires scope "${tool.requiresScope}", got "${scopeLabel}"`,
         );
@@ -101,7 +96,7 @@ export async function handleMcp(
     version: "0.1.0",
     registerTools: (server, e) => {
       const reg = server as unknown as RegisterableServer;
-      for (const tool of READ_TOOLS) {
+      for (const tool of ALL_TOOLS) {
         registerToolEntry(reg, e, tool, scopes, scopeLabel);
       }
     },
