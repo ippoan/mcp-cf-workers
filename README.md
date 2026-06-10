@@ -169,6 +169,37 @@ CF Access (RS256 / 人間 / SSO) と HS256 (machine-to-machine / 共有秘密) �
 排他ではなく、surface ごとに使い分ける (= `ref-files-worker` は `/ui/*` に
 CF Access、`/mcp` + `/v1/*` に HS256)。
 
+### 共有 auth プリミティブ (consumer 重複の集約)
+
+複数の consumer (cdp-relay / ref-files-worker / HealthConnectReaderWorker /
+auth-worker / secrets-inventory) が手コピーしていた小物を `./auth` に集約
+(Refs #46)。全て framework 非依存 (node / vitest から import 可)。
+
+```ts
+import {
+  timingSafeEqual,        // 長さも秘匿する constant-time 文字列比較 (opaque token 用)
+  resolveSecret,          // string | SecretsStoreSecret → string | null (fail-closed)
+  verifyHs256Jwt,         // 汎用 HS256 verifier (Web Crypto、jose 非依存)
+  introspectBindingJwt,   // auth-worker /mcp/introspect で binding_jwt 検証 (core)
+  b64urlToBytes, b64urlToString, bytesToB64url, stringToB64url, // base64url
+} from "@ippoan/mcp-cf-workers/auth";
+import { bindingJwtMiddleware } from "@ippoan/mcp-cf-workers/auth/binding-jwt-hono";
+```
+
+- **`timingSafeEqual(a, b)`** — Workers に `crypto.timingSafeEqual` が無いため
+  両者を HMAC-SHA256 で 32B に固定化してから XOR 比較する (= 値・長さ両方を秘匿)。
+  opaque shared-secret token (`RELAY_TOKEN` 等) の照合用。等長 byte 配列 (JWT
+  署名等) は `constantTimeEqualBytes` を使う。
+- **`verifyHs256Jwt<TClaims>(token, secret, opts?)`** — `mcp-jwt` (jose、
+  `github_login` 固定) と違い、claim 形を generics + `validateClaims` 注入で
+  吸収する汎用版。`email` / `tenant_id` / `github_login` 等の差を consumer 側で
+  validator として渡す。`audience` は単値 / comma 区切り / `string[]` (`"*"` で
+  aud check 無効)、省略時は aud を一切見ない。失敗は `Hs256JwtError` (coarse
+  reason)。
+- **`introspectBindingJwt(authHeader, env, opts?)`** — `bindingJwtMiddleware`
+  (hono) の core。WWW-Authenticate / aud allowlist / fail-closed 503 を含む。
+  `resourceMetadataSlug` で RFC 9728 slug を consumer ごとに指定する。
+
 ## Design
 
 - `ippoan/ci-dashboard` の `src/mcp/server.ts` pattern (SDK `McpServer` +

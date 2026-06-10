@@ -11,7 +11,12 @@
     "./auth/cf-access": "./src/auth/cf-access.ts",
     "./auth/cf-access-hono": "./src/auth/cf-access-hono.ts",
     "./auth/mcp-jwt": "./src/auth/mcp-jwt.ts",
-    "./auth/mcp-jwt-hono": "./src/auth/mcp-jwt-hono.ts"
+    "./auth/mcp-jwt-hono": "./src/auth/mcp-jwt-hono.ts",
+    "./auth/hs256-jwt": "./src/auth/hs256-jwt.ts",
+    "./auth/crypto": "./src/auth/crypto.ts",
+    "./auth/secret": "./src/auth/secret.ts",
+    "./auth/binding-jwt": "./src/auth/binding-jwt.ts",
+    "./auth/binding-jwt-hono": "./src/auth/binding-jwt-hono.ts"
   },
   "files": [
     "src",
