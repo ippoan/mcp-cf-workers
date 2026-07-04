@@ -90,16 +90,16 @@ describe("read tools delegate to the CF client", () => {
       before: "2026-07-04T00:00:00Z",
       actor_email: "m.tama.ramu@gmail.com",
       resource_product: "workers",
-      per_page: 50,
-      page: 2,
+      limit: 50,
+      cursor: "abc123",
     });
     expect(seenFilter).toEqual({
       since: "2026-07-01T00:00:00Z",
       before: "2026-07-04T00:00:00Z",
       actorEmail: "m.tama.ramu@gmail.com",
       resourceProduct: "workers",
-      perPage: 50,
-      page: 2,
+      limit: 50,
+      cursor: "abc123",
     });
   });
 });
@@ -146,11 +146,11 @@ describe("input schemas", () => {
       listAuditLogsTool.inputSchema.safeParse({
         since: "2026-07-01T00:00:00Z",
         actor_email: "m.tama.ramu@gmail.com",
-        per_page: 50,
+        limit: 50,
       }).success,
     ).toBe(true);
-    expect(listAuditLogsTool.inputSchema.safeParse({ per_page: 0 }).success).toBe(false);
-    expect(listAuditLogsTool.inputSchema.safeParse({ page: 0 }).success).toBe(false);
+    expect(listAuditLogsTool.inputSchema.safeParse({ limit: 0 }).success).toBe(false);
+    expect(listAuditLogsTool.inputSchema.safeParse({ cursor: "" }).success).toBe(true);
     expect(listAuditLogsTool.inputSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 });

@@ -73,9 +73,13 @@ export interface CreateAccessAppBody {
 }
 
 /**
- * `GET /logs/audit` のフィルタ。CF API の query string にそのままマップする
- * (`actorEmail` → `actor.email`、`resourceProduct` → `resource.product`)。
- * すべて optional — 未指定なら CF 側デフォルト (直近分、`per_page` 既定値) で返る。
+ * `GET /logs/audit` (v2) のフィルタ。CF API の query string にそのままマップする
+ * (`actorEmail` → `actor_email`、`resourceProduct` → `resource_product`)。
+ * すべて optional — 未指定なら CF 側デフォルト (直近分、`limit` 既定値) で返る。
+ *
+ * v1 (`/audit_logs`) の `per_page`/`page` (1-indexed offset) とは異なり、v2 は
+ * `limit`/`cursor` (cursor ベースのページング) を使う。dot 区切り
+ * (`actor.email` 等) も v1 の記法で、v2 は underscore (`actor_email`)。
  */
 export interface AuditLogFilter {
   /** ISO8601。この時刻以降のイベント。 */
@@ -86,10 +90,10 @@ export interface AuditLogFilter {
   actorEmail?: string;
   /** 対象 product (例 "access", "workers", "dns")。 */
   resourceProduct?: string;
-  /** 1 ページの件数。CF 既定 / 上限に従う。 */
-  perPage?: number;
-  /** ページ番号 (1-indexed)。 */
-  page?: number;
+  /** 返す件数。CF 既定 / 上限に従う。 */
+  limit?: number;
+  /** 次ページ取得用 cursor (前回応答の `result_info.cursors.after` 等)。 */
+  cursor?: string;
 }
 
 export interface CfClientOptions {
@@ -211,10 +215,10 @@ export class CfAccessClient {
     const params = new URLSearchParams();
     if (filter.since) params.set("since", filter.since);
     if (filter.before) params.set("before", filter.before);
-    if (filter.actorEmail) params.set("actor.email", filter.actorEmail);
-    if (filter.resourceProduct) params.set("resource.product", filter.resourceProduct);
-    if (filter.perPage !== undefined) params.set("per_page", String(filter.perPage));
-    if (filter.page !== undefined) params.set("page", String(filter.page));
+    if (filter.actorEmail) params.set("actor_email", filter.actorEmail);
+    if (filter.resourceProduct) params.set("resource_product", filter.resourceProduct);
+    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
+    if (filter.cursor !== undefined) params.set("cursor", filter.cursor);
     const qs = params.toString();
     return this.request<CfRecord[]>("GET", qs ? `/logs/audit?${qs}` : "/logs/audit");
   }
