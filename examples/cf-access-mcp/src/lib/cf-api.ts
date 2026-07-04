@@ -75,17 +75,21 @@ export interface CreateAccessAppBody {
 /**
  * `GET /logs/audit` (v2) のフィルタ。CF API の query string にそのままマップする
  * (`actorEmail` → `actor_email`、`resourceProduct` → `resource_product`)。
- * すべて optional — 未指定なら CF 側デフォルト (直近分、`limit` 既定値) で返る。
+ *
+ * `since`/`before` は **必須** — CF 公式ドキュメントは「全パラメータ optional」と
+ * 記載しているが、実機では両方無いと `HTTP 400
+ * "query parameter 'since'/'before' is required"` になる (2026-07-04 確認、
+ * issue #51)。それ以外は optional。
  *
  * v1 (`/audit_logs`) の `per_page`/`page` (1-indexed offset) とは異なり、v2 は
  * `limit`/`cursor` (cursor ベースのページング) を使う。dot 区切り
  * (`actor.email` 等) も v1 の記法で、v2 は underscore (`actor_email`)。
  */
 export interface AuditLogFilter {
-  /** ISO8601。この時刻以降のイベント。 */
-  since?: string;
-  /** ISO8601。この時刻より前のイベント。 */
-  before?: string;
+  /** ISO8601。この時刻以降のイベント (必須)。 */
+  since: string;
+  /** ISO8601。この時刻より前のイベント (必須)。 */
+  before: string;
   /** 操作した actor のメールアドレス。 */
   actorEmail?: string;
   /** 対象 product (例 "access", "workers", "dns")。 */
@@ -208,19 +212,19 @@ export class CfAccessClient {
    * GET /logs/audit — account の Audit Log (v2) を read-only で取得する。
    * write 操作は無い (閲覧専用)。旧 `/audit_logs` (v1) は別 path で存在しない
    * ため誤って叩くと 10000 Authentication error になる (要 `/logs/audit`)。
-   * CF 側 token には `Account Settings: Read` scope が必要
-   * (無いと 403/10000 → {@link CfApiRequestError})。
+   * `since`/`before` 必須 (無いと 400)。CF 側 token には
+   * `Account Settings: Read` scope が必要 (無いと 403/10000 →
+   * {@link CfApiRequestError})。
    */
-  listAuditLogs(filter: AuditLogFilter = {}): Promise<CfRecord[]> {
+  listAuditLogs(filter: AuditLogFilter): Promise<CfRecord[]> {
     const params = new URLSearchParams();
-    if (filter.since) params.set("since", filter.since);
-    if (filter.before) params.set("before", filter.before);
+    params.set("since", filter.since);
+    params.set("before", filter.before);
     if (filter.actorEmail) params.set("actor_email", filter.actorEmail);
     if (filter.resourceProduct) params.set("resource_product", filter.resourceProduct);
     if (filter.limit !== undefined) params.set("limit", String(filter.limit));
     if (filter.cursor !== undefined) params.set("cursor", filter.cursor);
-    const qs = params.toString();
-    return this.request<CfRecord[]>("GET", qs ? `/logs/audit?${qs}` : "/logs/audit");
+    return this.request<CfRecord[]>("GET", `/logs/audit?${params.toString()}`);
   }
 
   // ----- Access write endpoints (PR2) --------------------------------------

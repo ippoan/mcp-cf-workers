@@ -147,7 +147,7 @@ describe("CfAccessClient", () => {
     await expect(client.listIdentityProviders()).rejects.toMatchObject({ status: 502 });
   });
 
-  it("lists audit logs with no filter (bare path, no query string)", async () => {
+  it("lists audit logs with only since/before (required), no optional filters", async () => {
     let seenUrl = "";
     const client = new CfAccessClient({
       accountId: "a",
@@ -158,9 +158,16 @@ describe("CfAccessClient", () => {
         return jsonResponse(envelope([{ id: "log1" }]));
       }),
     });
-    const logs = await client.listAuditLogs();
+    const logs = await client.listAuditLogs({
+      since: "2026-07-01T00:00:00Z",
+      before: "2026-07-04T00:00:00Z",
+    });
     expect(logs).toEqual([{ id: "log1" }]);
-    expect(seenUrl).toBe("https://cf.test/v4/accounts/a/logs/audit");
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe("/v4/accounts/a/logs/audit");
+    expect(url.searchParams.get("since")).toBe("2026-07-01T00:00:00Z");
+    expect(url.searchParams.get("before")).toBe("2026-07-04T00:00:00Z");
+    expect(url.searchParams.has("actor_email")).toBe(false);
   });
 
   it("lists audit logs with filter mapped to CF query params", async () => {
@@ -203,7 +210,9 @@ describe("CfAccessClient", () => {
         ),
       ),
     });
-    const err = await client.listAuditLogs().catch((e) => e);
+    const err = await client
+      .listAuditLogs({ since: "2026-07-01T00:00:00Z", before: "2026-07-04T00:00:00Z" })
+      .catch((e) => e);
     expect(err).toBeInstanceOf(CfApiRequestError);
     expect(err.status).toBe(403);
     expect(String(err.message)).toContain("9109: Unauthorized");

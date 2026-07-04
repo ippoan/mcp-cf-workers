@@ -50,10 +50,11 @@ CF API token は CF Secrets Store binding (`CF_ZEROTRUST_API_TOKEN`) から runt
 | `list_audit_logs` | `GET /logs/audit` |
 
 `list_audit_logs` (issue [#51]) は account の Audit Log (v2 API) を read-only で
-返す。`since` / `before` (ISO8601) / `actor_email` / `resource_product` /
-`limit` / `cursor` で絞り込める。production worker の custom domain / DNS /
-secret 等の設定変更を「いつ・誰が・何を」を Claude Code session から直接調査する
-ための tool (dashboard の Audit Log 画面を手動で見に行かなくて済む)。
+返す。`since` / `before` (ISO8601、**両方必須**) で対象期間を指定し、
+`actor_email` / `resource_product` / `limit` / `cursor` で絞り込める。
+production worker の custom domain / DNS / secret 等の設定変更を
+「いつ・誰が・何を」を Claude Code session から直接調査するための tool
+(dashboard の Audit Log 画面を手動で見に行かなくて済む)。
 
 **旧 `/audit_logs` (v1) という path は存在しない** — 誤って叩くと CF 側が
 `10000: Authentication error` を返す (実際は permission 不足ではなく path 誤り、
@@ -61,14 +62,22 @@ secret 等の設定変更を「いつ・誰が・何を」を Claude Code sessio
 parameter 名も v1 と異なる: `actor.email`→`actor_email`、
 `resource.product`→`resource_product`、`per_page`→`limit`、ページングは
 offset (`page`) でなく **cursor ベース** (`cursor`)。v1 の記法のまま叩くと
-`HTTP 400` になる。CF API token には **`Account Settings: Read`** scope が
-必要 (無いと 403/10000 → `isError` で返る)。`Access: Audit Logs Read` (Zero
-Trust Access の認証ログ専用 permission) は本 endpoint には無関係なので付与しても
-効果が無い。
+`HTTP 400` になる。
+
+**`since`/`before` は CF 側で必須** — 公式 API リファレンスは「全パラメータ
+optional」と書いているが、実機では両方無いと
+`HTTP 400 "query parameter 'since'/'before' is required"` になる
+(2026-07-04 実機で確認、ドキュメントと実装の乖離)。呼び出す時は必ず両方
+指定すること。
+
+CF API token には **`Account Settings: Read`** scope が必要 (無いと 403/10000
+→ `isError` で返る)。`Access: Audit Logs Read` (Zero Trust Access の認証ログ
+専用 permission) は本 endpoint には無関係なので付与しても効果が無い。
 
 ```jsonc
 list_audit_logs({
   since: "2026-07-01T00:00:00Z",
+  before: "2026-07-04T23:59:59Z",
   resource_product: "workers", // dns / access / workers 等
 })
 ```

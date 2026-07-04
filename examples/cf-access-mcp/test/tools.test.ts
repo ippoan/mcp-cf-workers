@@ -71,7 +71,10 @@ describe("read tools delegate to the CF client", () => {
 
   it("list_audit_logs → client.listAuditLogs, returns the raw result", async () => {
     const calls: string[] = [];
-    const res = await listAuditLogsTool.execute(fakeClient(calls), {});
+    const res = await listAuditLogsTool.execute(fakeClient(calls), {
+      since: "2026-07-01T00:00:00Z",
+      before: "2026-07-04T00:00:00Z",
+    });
     expect(res).toEqual([{ id: "log1" }]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatch(/^listAuditLogs\(/);
@@ -140,17 +143,39 @@ describe("input schemas", () => {
     expect(listAccessAppsTool.inputSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 
-  it("list_audit_logs args are all optional but reject unknown keys / bad types", () => {
-    expect(listAuditLogsTool.inputSchema.safeParse({}).success).toBe(true);
+  it("list_audit_logs requires since/before, rejects unknown keys / bad types", () => {
+    expect(listAuditLogsTool.inputSchema.safeParse({}).success).toBe(false);
+    expect(
+      listAuditLogsTool.inputSchema.safeParse({ since: "2026-07-01T00:00:00Z" }).success,
+    ).toBe(false);
     expect(
       listAuditLogsTool.inputSchema.safeParse({
         since: "2026-07-01T00:00:00Z",
+        before: "2026-07-04T00:00:00Z",
         actor_email: "m.tama.ramu@gmail.com",
         limit: 50,
       }).success,
     ).toBe(true);
-    expect(listAuditLogsTool.inputSchema.safeParse({ limit: 0 }).success).toBe(false);
-    expect(listAuditLogsTool.inputSchema.safeParse({ cursor: "" }).success).toBe(true);
-    expect(listAuditLogsTool.inputSchema.safeParse({ extra: 1 }).success).toBe(false);
+    expect(
+      listAuditLogsTool.inputSchema.safeParse({
+        since: "2026-07-01T00:00:00Z",
+        before: "2026-07-04T00:00:00Z",
+        limit: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      listAuditLogsTool.inputSchema.safeParse({
+        since: "2026-07-01T00:00:00Z",
+        before: "2026-07-04T00:00:00Z",
+        cursor: "",
+      }).success,
+    ).toBe(true);
+    expect(
+      listAuditLogsTool.inputSchema.safeParse({
+        since: "2026-07-01T00:00:00Z",
+        before: "2026-07-04T00:00:00Z",
+        extra: 1,
+      }).success,
+    ).toBe(false);
   });
 });
