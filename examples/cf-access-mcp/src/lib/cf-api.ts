@@ -4,7 +4,8 @@
  * 設計方針 (issue #26):
  *  - base URL と fetch 実装を constructor field 化し、テストで httptest 相当に
  *    差し替えられるようにする (本番は global fetch + 公式エンドポイント)。
- *  - account-scoped API (`/accounts/{account_id}/access/*`) のみを扱う。
+ *  - account-scoped API (`/accounts/{account_id}/*`) を扱う。当初は
+ *    `/access/*` のみだったが、issue #51 で `/audit_logs` (read-only) も追加。
  *  - token は呼び出し側 (server.ts) が CF Secrets Store binding の `.get()` で
  *    取得して string で渡す (= この client は binding に依存しない pure logic)。
  *  - CF の共通 envelope (`{ success, errors, messages, result }`) を解いて
@@ -69,6 +70,26 @@ export interface CreateAccessAppBody {
   domain: string;
   policies?: string[];
   allowed_idps?: string[];
+}
+
+/**
+ * `GET /audit_logs` のフィルタ。CF API の query string にそのままマップする
+ * (`actorEmail` → `actor.email`、`resourceProduct` → `resource.product`)。
+ * すべて optional — 未指定なら CF 側デフォルト (直近分、`per_page` 既定値) で返る。
+ */
+export interface AuditLogFilter {
+  /** ISO8601。この時刻以降のイベント。 */
+  since?: string;
+  /** ISO8601。この時刻より前のイベント。 */
+  before?: string;
+  /** 操作した actor のメールアドレス。 */
+  actorEmail?: string;
+  /** 対象 product (例 "access", "workers", "dns")。 */
+  resourceProduct?: string;
+  /** 1 ページの件数。CF 既定 / 上限に従う。 */
+  perPage?: number;
+  /** ページ番号 (1-indexed)。 */
+  page?: number;
 }
 
 export interface CfClientOptions {
@@ -175,6 +196,25 @@ export class CfAccessClient {
   /** GET /access/groups — Access groups。 */
   listAccessGroups(): Promise<CfRecord[]> {
     return this.request<CfRecord[]>("GET", "/access/groups");
+  }
+
+  // ----- Audit Log read endpoint (issue #51) -------------------------------
+
+  /**
+   * GET /audit_logs — account の Audit Log を read-only で取得する。
+   * write 操作は無い (閲覧専用)。CF 側 token に `Account Audit Logs: Read`
+   * scope が必要 (無いと 403 → {@link CfApiRequestError})。
+   */
+  listAuditLogs(filter: AuditLogFilter = {}): Promise<CfRecord[]> {
+    const params = new URLSearchParams();
+    if (filter.since) params.set("since", filter.since);
+    if (filter.before) params.set("before", filter.before);
+    if (filter.actorEmail) params.set("actor.email", filter.actorEmail);
+    if (filter.resourceProduct) params.set("resource.product", filter.resourceProduct);
+    if (filter.perPage !== undefined) params.set("per_page", String(filter.perPage));
+    if (filter.page !== undefined) params.set("page", String(filter.page));
+    const qs = params.toString();
+    return this.request<CfRecord[]>("GET", qs ? `/audit_logs?${qs}` : "/audit_logs");
   }
 
   // ----- Access write endpoints (PR2) --------------------------------------

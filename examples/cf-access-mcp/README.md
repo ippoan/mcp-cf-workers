@@ -47,6 +47,23 @@ CF API token は CF Secrets Store binding (`CF_ZEROTRUST_API_TOKEN`) から runt
 | `list_service_tokens` | `GET /access/service_tokens` |
 | `list_identity_providers` | `GET /access/identity_providers` |
 | `list_access_groups` | `GET /access/groups` |
+| `list_audit_logs` | `GET /audit_logs` |
+
+`list_audit_logs` (issue [#51]) は account の Audit Log を read-only で返す。
+`since` / `before` (ISO8601) / `actor_email` / `resource_product` / `per_page` /
+`page` で絞り込める。production worker の custom domain / DNS / secret 等の
+設定変更を「いつ・誰が・何を」を Claude Code session から直接調査するための tool
+(dashboard の Audit Log 画面を手動で見に行かなくて済む)。CF API token に
+**Account Audit Logs: Read** scope が必要 (無いと CF 側 403 → `isError` で返る)。
+
+```jsonc
+list_audit_logs({
+  since: "2026-07-01T00:00:00Z",
+  resource_product: "workers", // dns / access / workers 等
+})
+```
+
+[#51]: https://github.com/ippoan/mcp-cf-workers/issues/51
 
 ### write — 実装済み (PR2)
 
@@ -86,6 +103,7 @@ protect_hostname({
 - **PR4**: auth-worker の `MCP_RESOURCE_ORIGINS_ALLOWLIST` に origin 追加 +
   claude-md 登録 (別 repo)。
 - **PR5**: `protect_hostname` で egov-staging 保護 → `cf_logging` で invocation 0 検証。
+- **issue #51** ✅: `list_audit_logs` (read-only Audit Log 閲覧 tool) を追加。
 
 ## ローカル開発
 
@@ -121,6 +139,11 @@ bash ~/.claude/skills/secret-inject/scripts/inject-secret.sh \
   Providers, and Groups Read`
 - write (PR2 の write tool / `protect_hostname` を実トラフィックで使う場合):
   `Access: Apps and Policies Write` (apps/policies CRUD)
+- `list_audit_logs` (issue #51) を使う場合: **`Access: Audit Logs Read`**
+  (CF のトークン発行 UI では単に `Account` → `Audit Logs` → `Read` と表示される)
+
+3 つとも Read/Edit で 1 つの custom token にまとめて発行できる (Apps and
+Policies は Edit を選べば Read も含まれる)。
 
 > PR2 の write tool を実際に叩くには、token を **Write 権限付き**で再投入する
 > (同名 `CF_ZEROTRUST_API_TOKEN` を secret-inject で上書き)。read のみの token の

@@ -6,6 +6,7 @@ import {
   listServiceTokensTool,
   listIdentityProvidersTool,
   listAccessGroupsTool,
+  listAuditLogsTool,
   READ_TOOLS,
 } from "../src/mcp/tools";
 import type { CfAccessClient } from "../src/lib/cf-api";
@@ -25,6 +26,7 @@ function fakeClient(calls: string[]): CfAccessClient {
     listServiceTokens: rec("listServiceTokens", [{ id: "s" }]),
     listIdentityProviders: rec("listIdentityProviders", [{ id: "i" }]),
     listAccessGroups: rec("listAccessGroups", [{ id: "g" }]),
+    listAuditLogs: rec("listAuditLogs", [{ id: "log1" }]),
   } as unknown as CfAccessClient;
 }
 
@@ -66,10 +68,44 @@ describe("read tools delegate to the CF client", () => {
     await listAccessGroupsTool.execute(fakeClient(calls), {});
     expect(calls).toEqual(["listAccessGroups()"]);
   });
+
+  it("list_audit_logs → client.listAuditLogs, returns the raw result", async () => {
+    const calls: string[] = [];
+    const res = await listAuditLogsTool.execute(fakeClient(calls), {});
+    expect(res).toEqual([{ id: "log1" }]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/^listAuditLogs\(/);
+  });
+
+  it("list_audit_logs maps snake_case args to the client's camelCase filter", async () => {
+    let seenFilter: unknown;
+    const client = {
+      listAuditLogs: async (filter: unknown) => {
+        seenFilter = filter;
+        return [];
+      },
+    } as unknown as CfAccessClient;
+    await listAuditLogsTool.execute(client, {
+      since: "2026-07-01T00:00:00Z",
+      before: "2026-07-04T00:00:00Z",
+      actor_email: "m.tama.ramu@gmail.com",
+      resource_product: "workers",
+      per_page: 50,
+      page: 2,
+    });
+    expect(seenFilter).toEqual({
+      since: "2026-07-01T00:00:00Z",
+      before: "2026-07-04T00:00:00Z",
+      actorEmail: "m.tama.ramu@gmail.com",
+      resourceProduct: "workers",
+      perPage: 50,
+      page: 2,
+    });
+  });
 });
 
 describe("READ_TOOLS registry", () => {
-  it("exposes the 6 read tools with unique names in a stable order", () => {
+  it("exposes the 7 read tools with unique names in a stable order", () => {
     const names = READ_TOOLS.map((t) => t.name);
     expect(names).toEqual([
       "list_access_apps",
@@ -78,6 +114,7 @@ describe("READ_TOOLS registry", () => {
       "list_service_tokens",
       "list_identity_providers",
       "list_access_groups",
+      "list_audit_logs",
     ]);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -101,5 +138,19 @@ describe("input schemas", () => {
   it("no-arg tools reject unknown keys (strict)", () => {
     expect(listAccessAppsTool.inputSchema.safeParse({}).success).toBe(true);
     expect(listAccessAppsTool.inputSchema.safeParse({ extra: 1 }).success).toBe(false);
+  });
+
+  it("list_audit_logs args are all optional but reject unknown keys / bad types", () => {
+    expect(listAuditLogsTool.inputSchema.safeParse({}).success).toBe(true);
+    expect(
+      listAuditLogsTool.inputSchema.safeParse({
+        since: "2026-07-01T00:00:00Z",
+        actor_email: "m.tama.ramu@gmail.com",
+        per_page: 50,
+      }).success,
+    ).toBe(true);
+    expect(listAuditLogsTool.inputSchema.safeParse({ per_page: 0 }).success).toBe(false);
+    expect(listAuditLogsTool.inputSchema.safeParse({ page: 0 }).success).toBe(false);
+    expect(listAuditLogsTool.inputSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 });
