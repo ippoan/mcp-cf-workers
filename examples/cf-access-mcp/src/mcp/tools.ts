@@ -75,8 +75,11 @@ export const listAccessGroupsTool = {
 
 const listAuditLogsArgs = z
   .object({
-    since: z.string().optional().describe("ISO8601 timestamp。この時刻以降のイベントのみ。"),
-    before: z.string().optional().describe("ISO8601 timestamp。この時刻より前のイベントのみ。"),
+    // CF Audit Log v2 API は since/before を必須とする (公式ドキュメントは「全
+    // パラメータ optional」と記載しているが実機では両方必須、無いと
+    // `HTTP 400 "query parameter 'since'/'before' is required"`、2026-07-04 確認)。
+    since: z.string().describe("ISO8601 timestamp (必須)。この時刻以降のイベントのみ。"),
+    before: z.string().describe("ISO8601 timestamp (必須)。この時刻より前のイベントのみ。"),
     actor_email: z.string().optional().describe("操作した actor のメールアドレスで絞り込む。"),
     resource_product: z
       .string()
@@ -93,10 +96,11 @@ const listAuditLogsArgs = z
 export const listAuditLogsTool = {
   name: "list_audit_logs",
   description:
-    "List Cloudflare account Audit Log entries (read-only). Use since/before/" +
-    "actor_email/resource_product to narrow down who changed what and when " +
-    "(e.g. custom domain / DNS / secret changes). Requires the CF API token to " +
-    "have the 'Account Settings: Read' scope.",
+    "List Cloudflare account Audit Log entries (read-only). since/before " +
+    "(ISO8601) are REQUIRED by the CF API — pass a time range (e.g. last 24h). " +
+    "Use actor_email/resource_product to further narrow down who changed what " +
+    "and when (e.g. custom domain / DNS / secret changes). Requires the CF API " +
+    "token to have the 'Account Settings: Read' scope.",
   inputSchema: listAuditLogsArgs,
   execute: (client, args) =>
     client.listAuditLogs({
