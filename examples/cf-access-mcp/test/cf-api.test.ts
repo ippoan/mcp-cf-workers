@@ -147,6 +147,68 @@ describe("CfAccessClient", () => {
     await expect(client.listIdentityProviders()).rejects.toMatchObject({ status: 502 });
   });
 
+  it("lists audit logs with no filter (bare path, no query string)", async () => {
+    let seenUrl = "";
+    const client = new CfAccessClient({
+      accountId: "a",
+      token: "t",
+      baseUrl: "https://cf.test/v4",
+      fetchImpl: fakeFetch((url) => {
+        seenUrl = url;
+        return jsonResponse(envelope([{ id: "log1" }]));
+      }),
+    });
+    const logs = await client.listAuditLogs();
+    expect(logs).toEqual([{ id: "log1" }]);
+    expect(seenUrl).toBe("https://cf.test/v4/accounts/a/audit_logs");
+  });
+
+  it("lists audit logs with filter mapped to CF query params", async () => {
+    let seenUrl = "";
+    const client = new CfAccessClient({
+      accountId: "a",
+      token: "t",
+      baseUrl: "https://cf.test/v4",
+      fetchImpl: fakeFetch((url) => {
+        seenUrl = url;
+        return jsonResponse(envelope([]));
+      }),
+    });
+    await client.listAuditLogs({
+      since: "2026-07-01T00:00:00Z",
+      before: "2026-07-04T00:00:00Z",
+      actorEmail: "m.tama.ramu@gmail.com",
+      resourceProduct: "workers",
+      perPage: 50,
+      page: 2,
+    });
+    const url = new URL(seenUrl);
+    expect(url.pathname).toBe("/v4/accounts/a/audit_logs");
+    expect(url.searchParams.get("since")).toBe("2026-07-01T00:00:00Z");
+    expect(url.searchParams.get("before")).toBe("2026-07-04T00:00:00Z");
+    expect(url.searchParams.get("actor.email")).toBe("m.tama.ramu@gmail.com");
+    expect(url.searchParams.get("resource.product")).toBe("workers");
+    expect(url.searchParams.get("per_page")).toBe("50");
+    expect(url.searchParams.get("page")).toBe("2");
+  });
+
+  it("throws CfApiRequestError on audit log 403 (missing token scope)", async () => {
+    const client = new CfAccessClient({
+      accountId: "a",
+      token: "t",
+      fetchImpl: fakeFetch(() =>
+        jsonResponse(
+          { success: false, errors: [{ code: 9109, message: "Unauthorized" }], messages: [], result: null },
+          403,
+        ),
+      ),
+    });
+    const err = await client.listAuditLogs().catch((e) => e);
+    expect(err).toBeInstanceOf(CfApiRequestError);
+    expect(err.status).toBe(403);
+    expect(String(err.message)).toContain("9109: Unauthorized");
+  });
+
   it("wraps fetch rejection as status 0", async () => {
     const client = new CfAccessClient({
       accountId: "a",

@@ -73,6 +73,39 @@ export const listAccessGroupsTool = {
   execute: (client, _args) => client.listAccessGroups(),
 } satisfies ToolEntry<typeof noArgs>;
 
+const listAuditLogsArgs = z
+  .object({
+    since: z.string().optional().describe("ISO8601 timestamp。この時刻以降のイベントのみ。"),
+    before: z.string().optional().describe("ISO8601 timestamp。この時刻より前のイベントのみ。"),
+    actor_email: z.string().optional().describe("操作した actor のメールアドレスで絞り込む。"),
+    resource_product: z
+      .string()
+      .optional()
+      .describe("対象 product で絞り込む (例 access / workers / dns)。"),
+    per_page: z.number().int().min(1).max(1000).optional().describe("1 ページの件数。"),
+    page: z.number().int().min(1).optional().describe("ページ番号 (1-indexed)。"),
+  })
+  .strict();
+
+export const listAuditLogsTool = {
+  name: "list_audit_logs",
+  description:
+    "List Cloudflare account Audit Log entries (read-only). Use since/before/" +
+    "actor_email/resource_product to narrow down who changed what and when " +
+    "(e.g. custom domain / DNS / secret changes). Requires the CF API token to " +
+    "have the 'Account Audit Logs: Read' scope.",
+  inputSchema: listAuditLogsArgs,
+  execute: (client, args) =>
+    client.listAuditLogs({
+      since: args.since,
+      before: args.before,
+      actorEmail: args.actor_email,
+      resourceProduct: args.resource_product,
+      perPage: args.per_page,
+      page: args.page,
+    }),
+} satisfies ToolEntry<typeof listAuditLogsArgs>;
+
 // ===== write tools (PR2) ====================================================
 
 const WRITE = "mcp.write" as const;
@@ -254,6 +287,7 @@ export const READ_TOOLS: ToolEntry<z.ZodTypeAny>[] = [
   listServiceTokensTool as unknown as ToolEntry<z.ZodTypeAny>,
   listIdentityProvidersTool as unknown as ToolEntry<z.ZodTypeAny>,
   listAccessGroupsTool as unknown as ToolEntry<z.ZodTypeAny>,
+  listAuditLogsTool as unknown as ToolEntry<z.ZodTypeAny>,
 ];
 
 /** write tools。すべて `requiresScope: "mcp.write"`。 */

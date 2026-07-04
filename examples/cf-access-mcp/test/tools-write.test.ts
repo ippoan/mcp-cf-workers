@@ -172,10 +172,11 @@ describe("WRITE_TOOLS / ALL_TOOLS registry", () => {
     for (const t of WRITE_TOOLS) expect(t.requiresScope).toBe("mcp.write");
   });
 
-  it("ALL_TOOLS = 6 read + 6 write with unique names", () => {
-    expect(ALL_TOOLS).toHaveLength(12);
+  it("ALL_TOOLS = 7 read + 6 write with unique names", () => {
+    expect(ALL_TOOLS).toHaveLength(13);
     const names = ALL_TOOLS.map((t) => t.name);
-    expect(new Set(names).size).toBe(12);
+    expect(new Set(names).size).toBe(13);
     expect(names).toContain("protect_hostname");
+    expect(names).toContain("list_audit_logs");
   });
 });
