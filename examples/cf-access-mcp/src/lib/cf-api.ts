@@ -5,7 +5,7 @@
  *  - base URL と fetch 実装を constructor field 化し、テストで httptest 相当に
  *    差し替えられるようにする (本番は global fetch + 公式エンドポイント)。
  *  - account-scoped API (`/accounts/{account_id}/*`) を扱う。当初は
- *    `/access/*` のみだったが、issue #51 で `/audit_logs` (read-only) も追加。
+ *    `/access/*` のみだったが、issue #51 で `/logs/audit` (read-only) も追加。
  *  - token は呼び出し側 (server.ts) が CF Secrets Store binding の `.get()` で
  *    取得して string で渡す (= この client は binding に依存しない pure logic)。
  *  - CF の共通 envelope (`{ success, errors, messages, result }`) を解いて
@@ -73,7 +73,7 @@ export interface CreateAccessAppBody {
 }
 
 /**
- * `GET /audit_logs` のフィルタ。CF API の query string にそのままマップする
+ * `GET /logs/audit` のフィルタ。CF API の query string にそのままマップする
  * (`actorEmail` → `actor.email`、`resourceProduct` → `resource.product`)。
  * すべて optional — 未指定なら CF 側デフォルト (直近分、`per_page` 既定値) で返る。
  */
@@ -201,9 +201,11 @@ export class CfAccessClient {
   // ----- Audit Log read endpoint (issue #51) -------------------------------
 
   /**
-   * GET /audit_logs — account の Audit Log を read-only で取得する。
-   * write 操作は無い (閲覧専用)。CF 側 token に `Account Audit Logs: Read`
-   * scope が必要 (無いと 403 → {@link CfApiRequestError})。
+   * GET /logs/audit — account の Audit Log (v2) を read-only で取得する。
+   * write 操作は無い (閲覧専用)。旧 `/audit_logs` (v1) は別 path で存在しない
+   * ため誤って叩くと 10000 Authentication error になる (要 `/logs/audit`)。
+   * CF 側 token には `Account Settings: Read` scope が必要
+   * (無いと 403/10000 → {@link CfApiRequestError})。
    */
   listAuditLogs(filter: AuditLogFilter = {}): Promise<CfRecord[]> {
     const params = new URLSearchParams();
@@ -214,7 +216,7 @@ export class CfAccessClient {
     if (filter.perPage !== undefined) params.set("per_page", String(filter.perPage));
     if (filter.page !== undefined) params.set("page", String(filter.page));
     const qs = params.toString();
-    return this.request<CfRecord[]>("GET", qs ? `/audit_logs?${qs}` : "/audit_logs");
+    return this.request<CfRecord[]>("GET", qs ? `/logs/audit?${qs}` : "/logs/audit");
   }
 
   // ----- Access write endpoints (PR2) --------------------------------------
