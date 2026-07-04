@@ -82,8 +82,11 @@ const listAuditLogsArgs = z
       .string()
       .optional()
       .describe("対象 product で絞り込む (例 access / workers / dns)。"),
-    per_page: z.number().int().min(1).max(1000).optional().describe("1 ページの件数。"),
-    page: z.number().int().min(1).optional().describe("ページ番号 (1-indexed)。"),
+    limit: z.number().int().min(1).max(1000).optional().describe("返す件数。"),
+    cursor: z
+      .string()
+      .optional()
+      .describe("次ページ取得用 cursor (前回応答の result_info.cursors.after 等)。"),
   })
   .strict();
 
@@ -93,7 +96,7 @@ export const listAuditLogsTool = {
     "List Cloudflare account Audit Log entries (read-only). Use since/before/" +
     "actor_email/resource_product to narrow down who changed what and when " +
     "(e.g. custom domain / DNS / secret changes). Requires the CF API token to " +
-    "have the 'Account Audit Logs: Read' scope.",
+    "have the 'Account Settings: Read' scope.",
   inputSchema: listAuditLogsArgs,
   execute: (client, args) =>
     client.listAuditLogs({
@@ -101,8 +104,8 @@ export const listAuditLogsTool = {
       before: args.before,
       actorEmail: args.actor_email,
       resourceProduct: args.resource_product,
-      perPage: args.per_page,
-      page: args.page,
+      limit: args.limit,
+      cursor: args.cursor,
     }),
 } satisfies ToolEntry<typeof listAuditLogsArgs>;
 

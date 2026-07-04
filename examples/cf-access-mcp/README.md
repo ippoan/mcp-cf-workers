@@ -51,13 +51,17 @@ CF API token は CF Secrets Store binding (`CF_ZEROTRUST_API_TOKEN`) から runt
 
 `list_audit_logs` (issue [#51]) は account の Audit Log (v2 API) を read-only で
 返す。`since` / `before` (ISO8601) / `actor_email` / `resource_product` /
-`per_page` / `page` で絞り込める。production worker の custom domain / DNS /
+`limit` / `cursor` で絞り込める。production worker の custom domain / DNS /
 secret 等の設定変更を「いつ・誰が・何を」を Claude Code session から直接調査する
 ための tool (dashboard の Audit Log 画面を手動で見に行かなくて済む)。
 
-**旧 `/audit_logs` (v1 相当) という path は存在しない** — 誤って叩くと CF 側が
+**旧 `/audit_logs` (v1) という path は存在しない** — 誤って叩くと CF 側が
 `10000: Authentication error` を返す (実際は permission 不足ではなく path 誤り、
-2026-07-04 実機で確認)。CF API token には **`Account Settings: Read`** scope が
+2026-07-04 実機で確認)。正しい path は `/logs/audit` (v2)。v2 は query
+parameter 名も v1 と異なる: `actor.email`→`actor_email`、
+`resource.product`→`resource_product`、`per_page`→`limit`、ページングは
+offset (`page`) でなく **cursor ベース** (`cursor`)。v1 の記法のまま叩くと
+`HTTP 400` になる。CF API token には **`Account Settings: Read`** scope が
 必要 (無いと 403/10000 → `isError` で返る)。`Access: Audit Logs Read` (Zero
 Trust Access の認証ログ専用 permission) は本 endpoint には無関係なので付与しても
 効果が無い。
