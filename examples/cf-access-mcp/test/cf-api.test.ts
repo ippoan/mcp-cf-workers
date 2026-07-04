@@ -160,7 +160,7 @@ describe("CfAccessClient", () => {
     });
     const logs = await client.listAuditLogs();
     expect(logs).toEqual([{ id: "log1" }]);
-    expect(seenUrl).toBe("https://cf.test/v4/accounts/a/audit_logs");
+    expect(seenUrl).toBe("https://cf.test/v4/accounts/a/logs/audit");
   });
 
   it("lists audit logs with filter mapped to CF query params", async () => {
@@ -183,7 +183,7 @@ describe("CfAccessClient", () => {
       page: 2,
     });
     const url = new URL(seenUrl);
-    expect(url.pathname).toBe("/v4/accounts/a/audit_logs");
+    expect(url.pathname).toBe("/v4/accounts/a/logs/audit");
     expect(url.searchParams.get("since")).toBe("2026-07-01T00:00:00Z");
     expect(url.searchParams.get("before")).toBe("2026-07-04T00:00:00Z");
     expect(url.searchParams.get("actor.email")).toBe("m.tama.ramu@gmail.com");
