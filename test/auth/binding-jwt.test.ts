@@ -30,14 +30,34 @@ const activeBody = {
   exp: 9999999999,
 };
 
+const activeGoogleBody = {
+  active: true,
+  sub: "google:u1@example.com",
+  email: "u1@example.com",
+  scope: "mcp.read mcp.write",
+  exp: 9999999999,
+};
+
 describe("introspectBindingJwt", () => {
-  it("returns claims for an active token", async () => {
+  it("returns claims for an active token (GitHub flow)", async () => {
     const claims = await introspectBindingJwt("Bearer abc", env, {
       introspectFetch: respondWith(jsonResp(activeBody)),
     });
     expect(claims).toEqual({
       sub: "u1",
       github_login: "octocat",
+      scope: "mcp.read mcp.write",
+      exp: 9999999999,
+    });
+  });
+
+  it("returns claims for an active token (Google flow, no github_login)", async () => {
+    const claims = await introspectBindingJwt("Bearer abc", env, {
+      introspectFetch: respondWith(jsonResp(activeGoogleBody)),
+    });
+    expect(claims).toEqual({
+      sub: "google:u1@example.com",
+      email: "u1@example.com",
       scope: "mcp.read mcp.write",
       exp: 9999999999,
     });
@@ -101,6 +121,16 @@ describe("introspectBindingJwt", () => {
     await expect(
       introspectBindingJwt("Bearer x", env, {
         introspectFetch: respondWith(jsonResp({ active: true, sub: "u" })),
+      }),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("503 when neither github_login nor email is present", async () => {
+    await expect(
+      introspectBindingJwt("Bearer x", env, {
+        introspectFetch: respondWith(
+          jsonResp({ active: true, sub: "u", scope: "mcp.read", exp: 9999999999 }),
+        ),
       }),
     ).rejects.toMatchObject({ status: 503 });
   });
