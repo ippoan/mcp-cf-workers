@@ -18,7 +18,7 @@ import {
  * - header missing / bad scheme → 401 + WWW-Authenticate (error="invalid_request")
  * - active:false / aud mismatch → 401 + WWW-Authenticate (error="invalid_token")
  * - introspect 503 / fetch failure → 503 (fail-closed, no WWW-Authenticate)
- * - success → `c.set("bindingJwt", { sub, github_login, scope, exp })`
+ * - success → `c.set("bindingJwt", { sub, scope, exp, ...github_login|email })`
  *
  * Mount in front of the `/mcp` route so the MCP handler only sees authenticated
  * requests; gate write tools by inspecting `c.var.bindingJwt.scope`.

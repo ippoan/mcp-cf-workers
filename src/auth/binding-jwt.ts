@@ -21,10 +21,19 @@ const SCHEME_PREFIX = "Bearer ";
 
 export const DEFAULT_AUTH_WORKER_ORIGIN = "https://auth.ippoan.org";
 
-/** `/mcp/introspect` active response shape (RFC 7662 §2.2 + ippoan ext). */
+/**
+ * `/mcp/introspect` active response shape (RFC 7662 §2.2 + ippoan ext).
+ *
+ * `github_login` / `email` are IdP-specific and mutually exclusive: auth-worker's
+ * GitHub flow sets `github_login` (no `email`), its Google flow sets `email`
+ * (no `github_login` — Refs ippoan/auth-worker#414). Exactly one is present on
+ * any active token; callers that only need `sub` for identity don't have to
+ * branch on IdP.
+ */
 export interface BindingJwtClaims {
   sub: string;
-  github_login: string;
+  github_login?: string;
+  email?: string;
   scope: string;
   exp: number;
 }
@@ -147,6 +156,7 @@ export async function introspectBindingJwt(
     scope?: unknown;
     sub?: unknown;
     github_login?: unknown;
+    email?: unknown;
     exp?: unknown;
     aud?: unknown;
   };
@@ -160,11 +170,16 @@ export async function introspectBindingJwt(
     throw new BindingJwtError(401, "invalid_token", "token not active");
   }
 
+  // `github_login` (GitHub flow) and `email` (Google flow) are IdP-specific —
+  // exactly one identifies the caller, neither is universally required.
+  // Refs ippoan/auth-worker#414 / ohishi-exp/nuxt-dtako-admin#376: kyuyo-mcp
+  // was the first Google-flow consumer and hard-required `github_login` broke
+  // it outright (every active Google token got rejected as "missing claims").
   if (
     typeof body.sub !== "string" ||
-    typeof body.github_login !== "string" ||
     typeof body.scope !== "string" ||
-    typeof body.exp !== "number"
+    typeof body.exp !== "number" ||
+    (typeof body.github_login !== "string" && typeof body.email !== "string")
   ) {
     throw new BindingJwtError(503, null, "introspect response missing required claims");
   }
@@ -179,7 +194,8 @@ export async function introspectBindingJwt(
 
   return {
     sub: body.sub,
-    github_login: body.github_login,
+    ...(typeof body.github_login === "string" ? { github_login: body.github_login } : {}),
+    ...(typeof body.email === "string" ? { email: body.email } : {}),
     scope: body.scope,
     exp: body.exp,
   };
