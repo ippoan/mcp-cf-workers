@@ -157,10 +157,16 @@ export async function introspectBindingJwt(
   // fetch routes on the binding itself, not on the URL's host, so a fixed
   // dummy origin is fine (never touches DNS/TLS).
   const authWorkerBinding = options.authWorkerBinding ?? env.AUTH_WORKER;
+  // The dummy URL is only correct when the binding's fetch is what actually
+  // runs — if introspectFetch (test override) is set, it takes over both the
+  // fetch implementation AND the URL it's called with, matching the
+  // origin-based shape callers/tests expect regardless of whether a binding
+  // happens to be present in options/env.
+  const usingBinding = !options.introspectFetch && !!authWorkerBinding;
   const fetchImpl =
     options.introspectFetch ??
     (authWorkerBinding ? authWorkerBinding.fetch.bind(authWorkerBinding) : fetch);
-  const introspectUrl = authWorkerBinding
+  const introspectUrl = usingBinding
     ? "https://auth-worker.internal/mcp/introspect"
     : `${authOrigin}/mcp/introspect`;
   let resp: Response;
