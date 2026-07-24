@@ -238,6 +238,28 @@ describe("introspectBindingJwt", () => {
     expect(bindingCalled).toBe(false);
   });
 
+  it("introspectFetch also takes precedence over the binding's dummy URL (regression)", async () => {
+    // Bug: introspectUrl was previously chosen by "is a binding present"
+    // instead of "is the binding what actually runs" — so a test/consumer
+    // passing introspectFetch alongside an authWorkerBinding/env.AUTH_WORKER
+    // still got called with the internal dummy URL instead of the normal
+    // authOrigin-based one, breaking any assertion on the introspect URL.
+    let seenUrl = "";
+    const binding = {
+      fetch: (async () => "should never be called") as unknown as typeof fetch,
+    };
+    const f = (async (input: RequestInfo | URL) => {
+      seenUrl = String(input);
+      return jsonResp(activeBody);
+    }) as unknown as typeof fetch;
+    await introspectBindingJwt(
+      "Bearer x",
+      { ...env, AUTH_WORKER: binding },
+      { introspectFetch: f, authWorkerOrigin: "https://auth.test" },
+    );
+    expect(seenUrl).toBe("https://auth.test/mcp/introspect");
+  });
+
   it("authWorkerBinding takes precedence over authWorkerOrigin/env for the fetch target", async () => {
     let seenUrl = "";
     const binding = {
