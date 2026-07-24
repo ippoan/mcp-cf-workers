@@ -174,6 +174,59 @@ describe("introspectBindingJwt", () => {
     await introspectBindingJwt("Bearer x", {}, { introspectFetch: f });
     expect(seenUrl).toBe(`${DEFAULT_AUTH_WORKER_ORIGIN}/mcp/introspect`);
   });
+
+  it("uses authWorkerBinding.fetch instead of the global fetch when set", async () => {
+    let called = false;
+    const binding = {
+      fetch: (async () => {
+        called = true;
+        return jsonResp(activeBody);
+      }) as unknown as typeof fetch,
+    };
+    const claims = await introspectBindingJwt("Bearer x", env, { authWorkerBinding: binding });
+    expect(called).toBe(true);
+    expect(claims.sub).toBe("u1");
+  });
+
+  it("introspectFetch takes precedence over authWorkerBinding when both are set", async () => {
+    let bindingCalled = false;
+    const binding = {
+      fetch: (async () => {
+        bindingCalled = true;
+        return jsonResp(activeBody);
+      }) as unknown as typeof fetch,
+    };
+    const f = respondWith(jsonResp(activeBody));
+    await introspectBindingJwt("Bearer x", env, { authWorkerBinding: binding, introspectFetch: f });
+    expect(bindingCalled).toBe(false);
+  });
+
+  it("authWorkerBinding takes precedence over authWorkerOrigin/env for the fetch target", async () => {
+    let seenUrl = "";
+    const binding = {
+      fetch: (async (input: RequestInfo | URL) => {
+        seenUrl = String(input);
+        return jsonResp(activeBody);
+      }) as unknown as typeof fetch,
+    };
+    await introspectBindingJwt("Bearer x", env, {
+      authWorkerBinding: binding,
+      authWorkerOrigin: "https://auth-staging.test",
+    });
+    expect(seenUrl).not.toContain("auth-staging.test");
+    expect(seenUrl).toContain("/mcp/introspect");
+  });
+
+  it("propagates a 503 when authWorkerBinding.fetch rejects (fail-closed)", async () => {
+    const binding = {
+      fetch: (async () => {
+        throw new Error("binding down");
+      }) as unknown as typeof fetch,
+    };
+    await expect(
+      introspectBindingJwt("Bearer x", env, { authWorkerBinding: binding }),
+    ).rejects.toMatchObject({ status: 503 });
+  });
 });
 
 describe("wwwAuthenticate", () => {
