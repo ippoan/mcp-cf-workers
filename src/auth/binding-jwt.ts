@@ -53,14 +53,22 @@ export interface IntrospectBindingJwtOptions {
   introspectFetch?: typeof fetch;
   /**
    * Cloudflare Service Binding to auth-worker (e.g. `env.AUTH_WORKER`, a
-   * `[[services]]` binding in `wrangler.toml`). When set, the introspect
-   * request goes through `authWorkerBinding.fetch()` instead of a DNS/TLS
-   * HTTP call to `authWorkerOrigin` — the binding config in `wrangler.toml`
-   * is then the only thing that decides which auth-worker instance
-   * (prod/staging) is targeted, structurally removing the "forgot to set
-   * `AUTH_WORKER_ORIGIN`, silently defaulted to prod" footgun (Refs
+   * `[[services]]` binding in `wrangler.toml`). Resolution order:
+   *   `authWorkerBinding` → `env.AUTH_WORKER` → (falls back to origin-based fetch).
+   * When resolved, the introspect request goes through `.fetch()` instead of
+   * a DNS/TLS HTTP call to `authWorkerOrigin` — the binding config in
+   * `wrangler.toml` is then the only thing that decides which auth-worker
+   * instance (prod/staging) is targeted, structurally removing the "forgot
+   * to set `AUTH_WORKER_ORIGIN`, silently defaulted to prod" footgun (Refs
    * ippoan/auth-worker#435). Same account only — cross-account consumers
    * must keep using `authWorkerOrigin`.
+   *
+   * Reading `env.AUTH_WORKER` (rather than requiring every caller to thread
+   * it through `options` explicitly) matters for the Hono middleware
+   * ({@link ../binding-jwt-hono.ts}): its `options` are fixed once at
+   * `app.use(...)` registration time, before any request (and its `c.env`)
+   * exists, so a per-request Cloudflare binding can only reach this function
+   * via `env`, the same way `AUTH_WORKER_ORIGIN` already does.
    */
   authWorkerBinding?: { fetch: typeof fetch };
   /**
@@ -80,6 +88,8 @@ export interface IntrospectBindingJwtOptions {
 /** Minimal env shape this helper reads. Consumers pass their own `Env`. */
 export interface BindingJwtEnv {
   AUTH_WORKER_ORIGIN?: string;
+  /** Service Binding to auth-worker. See {@link IntrospectBindingJwtOptions.authWorkerBinding}. */
+  AUTH_WORKER?: { fetch: typeof fetch };
 }
 
 /**
@@ -142,16 +152,15 @@ export async function introspectBindingJwt(
 
   const authOrigin =
     options.authWorkerOrigin ?? env.AUTH_WORKER_ORIGIN ?? DEFAULT_AUTH_WORKER_ORIGIN;
-  // Service binding takes precedence over the origin-based fetch when both are
-  // set — the binding request still needs a URL, but workerd's binding fetch
-  // routes on the binding itself, not on the URL's host, so a fixed dummy
-  // origin is fine (never touches DNS/TLS).
+  // Service binding takes precedence over the origin-based fetch when
+  // resolved — the binding request still needs a URL, but workerd's binding
+  // fetch routes on the binding itself, not on the URL's host, so a fixed
+  // dummy origin is fine (never touches DNS/TLS).
+  const authWorkerBinding = options.authWorkerBinding ?? env.AUTH_WORKER;
   const fetchImpl =
     options.introspectFetch ??
-    (options.authWorkerBinding
-      ? options.authWorkerBinding.fetch.bind(options.authWorkerBinding)
-      : fetch);
-  const introspectUrl = options.authWorkerBinding
+    (authWorkerBinding ? authWorkerBinding.fetch.bind(authWorkerBinding) : fetch);
+  const introspectUrl = authWorkerBinding
     ? "https://auth-worker.internal/mcp/introspect"
     : `${authOrigin}/mcp/introspect`;
   let resp: Response;
