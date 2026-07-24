@@ -42,10 +42,27 @@ export interface IntrospectBindingJwtOptions {
   /**
    * auth-worker origin. Resolution order:
    *   `authWorkerOrigin` → `env.AUTH_WORKER_ORIGIN` → {@link DEFAULT_AUTH_WORKER_ORIGIN}.
+   *
+   * Used as the fetch target unless {@link authWorkerBinding} is set; always
+   * used (regardless of `authWorkerBinding`) as the public URL advertised in
+   * the `WWW-Authenticate` `resource_metadata` attribute, since that must be
+   * reachable by the caller (claude.ai etc.), not just by this Worker.
    */
   authWorkerOrigin?: string;
-  /** Test override; production goes through the global `fetch`. */
+  /** Test override; takes precedence over both `authWorkerBinding` and the global `fetch`. */
   introspectFetch?: typeof fetch;
+  /**
+   * Cloudflare Service Binding to auth-worker (e.g. `env.AUTH_WORKER`, a
+   * `[[services]]` binding in `wrangler.toml`). When set, the introspect
+   * request goes through `authWorkerBinding.fetch()` instead of a DNS/TLS
+   * HTTP call to `authWorkerOrigin` — the binding config in `wrangler.toml`
+   * is then the only thing that decides which auth-worker instance
+   * (prod/staging) is targeted, structurally removing the "forgot to set
+   * `AUTH_WORKER_ORIGIN`, silently defaulted to prod" footgun (Refs
+   * ippoan/auth-worker#435). Same account only — cross-account consumers
+   * must keep using `authWorkerOrigin`.
+   */
+  authWorkerBinding?: { fetch: typeof fetch };
   /**
    * Accepted `aud` allowlist. `null` / omitted skips the aud check and defers
    * to auth-worker's `/mcp/introspect` decision. Pass e.g. `["my-mcp"]` to be
@@ -125,10 +142,21 @@ export async function introspectBindingJwt(
 
   const authOrigin =
     options.authWorkerOrigin ?? env.AUTH_WORKER_ORIGIN ?? DEFAULT_AUTH_WORKER_ORIGIN;
-  const fetchImpl = options.introspectFetch ?? fetch;
+  // Service binding takes precedence over the origin-based fetch when both are
+  // set — the binding request still needs a URL, but workerd's binding fetch
+  // routes on the binding itself, not on the URL's host, so a fixed dummy
+  // origin is fine (never touches DNS/TLS).
+  const fetchImpl =
+    options.introspectFetch ??
+    (options.authWorkerBinding
+      ? options.authWorkerBinding.fetch.bind(options.authWorkerBinding)
+      : fetch);
+  const introspectUrl = options.authWorkerBinding
+    ? "https://auth-worker.internal/mcp/introspect"
+    : `${authOrigin}/mcp/introspect`;
   let resp: Response;
   try {
-    resp = await fetchImpl(`${authOrigin}/mcp/introspect`, {
+    resp = await fetchImpl(introspectUrl, {
       method: "POST",
       headers: {
         Authorization: authHeader,
