@@ -188,6 +188,43 @@ describe("introspectBindingJwt", () => {
     expect(claims.sub).toBe("u1");
   });
 
+  it("falls back to env.AUTH_WORKER when options.authWorkerBinding is not set", async () => {
+    let called = false;
+    const binding = {
+      fetch: (async () => {
+        called = true;
+        return jsonResp(activeBody);
+      }) as unknown as typeof fetch,
+    };
+    const claims = await introspectBindingJwt("Bearer x", { ...env, AUTH_WORKER: binding }, {});
+    expect(called).toBe(true);
+    expect(claims.sub).toBe("u1");
+  });
+
+  it("options.authWorkerBinding takes precedence over env.AUTH_WORKER", async () => {
+    let envBindingCalled = false;
+    const envBinding = {
+      fetch: (async () => {
+        envBindingCalled = true;
+        return jsonResp(activeBody);
+      }) as unknown as typeof fetch,
+    };
+    let optsBindingCalled = false;
+    const optsBinding = {
+      fetch: (async () => {
+        optsBindingCalled = true;
+        return jsonResp(activeBody);
+      }) as unknown as typeof fetch,
+    };
+    await introspectBindingJwt(
+      "Bearer x",
+      { ...env, AUTH_WORKER: envBinding },
+      { authWorkerBinding: optsBinding },
+    );
+    expect(optsBindingCalled).toBe(true);
+    expect(envBindingCalled).toBe(false);
+  });
+
   it("introspectFetch takes precedence over authWorkerBinding when both are set", async () => {
     let bindingCalled = false;
     const binding = {

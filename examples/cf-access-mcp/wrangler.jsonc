@@ -25,6 +25,18 @@
     "CF_ACCOUNT_ID": "24b45709d060d957340180e995f0d373",
     "AUTH_WORKER_ORIGIN": "https://auth-staging.ippoan.org"
   },
+  // introspect (/mcp/introspect) は service binding経由 (同一account、Refs
+  // ippoan/auth-worker#435 / ippoan/mcp-cf-workers#60)。DNS/TLS無しの直接呼び出し
+  // になり、AUTH_WORKER_ORIGINの設定ドリフト (default prod化) が構造的に無くなる。
+  // 上のAUTH_WORKER_ORIGINは変更しない — discovery.tsの/.well-known/* proxyと
+  // WWW-Authenticateのresource_metadata表示に引き続き使うため (どちらもauth-staging
+  // を指す既存のippoan規約、DCRは外部クライアント直叩きのためbinding化できない)。
+  "services": [
+    {
+      "binding": "AUTH_WORKER",
+      "service": "auth-worker-staging"
+    }
+  ],
   // CF Zero Trust API token は CF Secrets Store binding 経由で runtime 取得する
   // (値は焼き込まない)。secret-inject skill で CF Secrets Store + GCP Secret
   // Manager に同名投入する:
