@@ -1,6 +1,6 @@
 {
   "name": "@ippoan/mcp-cf-workers",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Thin building blocks for MCP servers on Cloudflare Workers.",
   "type": "module",
   "main": "./src/index.ts",
