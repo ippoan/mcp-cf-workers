@@ -64,6 +64,37 @@ app.all("/mcp", (c) => mcp(c.req.raw, c.env));
 export default app;
 ```
 
+### MCP server — 2026-07-28 spec / SDK v2 (`createWorkerMcpV2`)
+
+MCP 2026-07-28 対応版。SDK v2 (`@modelcontextprotocol/server`, optional peer) の
+`createMcpHandler` を使い、modern (2026-07-28) と legacy (2025 年代の
+`initialize` handshake) の両クライアントを同一エンドポイントで serve する
+(legacy は既定でリクエスト毎ステートレス応答 = v1 factory と同じ姿勢)。
+v1 `createWorkerMcp` とは併存しており、consumer は任意のタイミングで
+乗り換えられる (Refs #66)。
+
+```ts
+import { createWorkerMcpV2 } from "@ippoan/mcp-cf-workers";
+import { z } from "zod";
+
+const mcp = createWorkerMcpV2<Env>({
+  name: "my-server",
+  version: "0.1.0",
+  registerTools: (server, env) => {
+    server.registerTool(
+      "echo",
+      // SDK v2: inputSchema は Standard Schema (z.object(...))。raw shape 不可
+      { description: "echo back", inputSchema: z.object({ message: z.string() }) },
+      async ({ message }) => ({ content: [{ type: "text", text: message }] }),
+    );
+  },
+  // handlerOptions: { legacy: "reject" } で 2026-07-28 専用にもできる
+});
+
+// mount は v1 と同形。第3引数で authInfo (binding-jwt の検証結果) を渡せる
+app.all("/mcp", (c) => mcp(c.req.raw, c.env));
+```
+
 ### Stateful MCP server (Durable Object + WebSocket)
 
 Stateless `createWorkerMcp` freezes a client's `tools/list` for the life of the

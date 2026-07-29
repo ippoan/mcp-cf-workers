@@ -2,7 +2,7 @@
 name: mcp-cf-workers-map
 generated-from: mcp-cf-workers:a55568df1839a7ccf103340c0acea9ef03fb0097
 paths: [src/]
-description: ippoan/mcp-cf-workers (Cloudflare Run MCP factory) の構造ナビゲーション。durable (DO+WS) path の構成・agents SDK 依存分離・Phase 0 hard gate 実機検証結果 (listChanged / Claude Code クライアント欠落) を収録。トリガー:「mcp-cf-workers」「durable path」「McpAgent」「listChanged」「tools/list_changed」「Phase 0 hard gate」「DO+WS」「createDurableMcp」「echo-do-ws」等。
+description: ippoan/mcp-cf-workers (Cloudflare Run MCP factory) の構造ナビゲーション。durable (DO+WS) path の構成・agents SDK 依存分離・Phase 0 hard gate 実機検証結果 (listChanged / Claude Code クライアント欠落) を収録。トリガー:「mcp-cf-workers」「durable path」「McpAgent」「listChanged」「tools/list_changed」「Phase 0 hard gate」「DO+WS」「createDurableMcp」「echo-do-ws」「createWorkerMcpV2」「factory v2」「MCP 2026-07-28」等。
 ---
 
 # mcp-cf-workers-map
@@ -13,9 +13,30 @@ CLAUDE.md は骨格化されているため、architecture / 実機検証記録�
 ## 区画
 
 - `src/factory.ts` / `src/auth/` — stateless `createWorkerMcp` + CF Access 認証 helper (framework-agnostic core)
+- `src/factory-v2.ts` — MCP 2026-07-28 対応の `createWorkerMcpV2` (SDK v2 = `@modelcontextprotocol/server`、optional peer)。v1 と併存。詳細は下記「factory v2」参照
 - `src/durable.ts` / `src/durable-server.ts` / `src/durable-mount.ts` — DO+WS (stateful) path。詳細は下記「CLAUDE.md から移設」参照
 - `src/index.ts` — named export の公開 API surface
 - `examples/echo-do-ws` — Phase 0 実機検証で使った PoC worker
+
+## factory v2 — MCP 2026-07-28 対応 (Refs #66, 2026-07-29)
+
+- `createWorkerMcpV2` は SDK v2 の `createMcpHandler` を包む。**両 era を同一
+  エンドポイントで serve**: modern (2026-07-28、`_meta` envelope) はネイティブ、
+  legacy (2025 年代 `initialize`) は既定 `legacy:'stateless'` でリクエスト毎
+  ステートレス応答 (= v1 factory と同じ姿勢なので既存 claude.ai connector は
+  無変更で動く)。`handlerOptions: { legacy: 'reject' }` で modern 専用化
+- `createMcpHandler` は「一度生成して使い回す」設計だが、Workers の `env` は
+  リクエスト毎引数なので **env の object identity で memoize** している
+  (isolate 内では同一 object → 実質一度だけ生成。テストで env を替えると再生成)。
+  異なる env object を交互に投げると memo が振動するのでテスト以外ではしない
+- **SDK v2 の registerTool は inputSchema が Standard Schema** (`z.object({...})`)。
+  v1 の raw shape (`{ message: z.string() }`) は不可 — consumer 移行時の主な書き換え点
+- authInfo は handler が header から導出しない (SDK v2 設計)。返り値 handler の
+  第3引数 `{ authInfo }` で注入し、tool handler は `ctx.http.authInfo` で読む
+  (binding-jwt の検証結果を渡す想定)
+- `@modelcontextprotocol/server` は **optional peer** (v1 のみ使う consumer に
+  強制しない)。devDep は exact pin。v1 SDK peer の削除は 12ヶ月 window 後の
+  メジャー bump で (#66 Phase 4)
 
 ## CLAUDE.md から移設 (2026-07-06)
 
