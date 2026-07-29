@@ -37,6 +37,13 @@ CLAUDE.md は骨格化されているため、architecture / 実機検証記録�
 - `@modelcontextprotocol/server` は **optional peer** (v1 のみ使う consumer に
   強制しない)。devDep は exact pin。v1 SDK peer の削除は 12ヶ月 window 後の
   メジャー bump で (#66 Phase 4)
+- **v1 SDK の devDep は `agents` の pin と同じ exact `1.29.0` に固定** (PR #67 CI
+  で発覚)。`agents@0.13.x` は sdk を exact "1.29.0" で依存しており、root が
+  ^range で 1.30.0 に解決されると `agents/node_modules/` に nested コピーが
+  生まれ、private property を持つ `McpServer` の名義的型不一致で
+  `durable.ts` が TS2416 になる。lockfile の無いリポなので fresh install の
+  CI だけが踏む (ローカル node_modules が古いと再現しない)。agents を
+  bump する時は同時に sdk pin も agents 側の値へ合わせること
 
 ## CLAUDE.md から移設 (2026-07-06)
 
