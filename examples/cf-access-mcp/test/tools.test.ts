@@ -108,9 +108,10 @@ describe("read tools delegate to the CF client", () => {
 });
 
 describe("READ_TOOLS registry", () => {
-  it("exposes the 7 read tools with unique names in a stable order", () => {
+  it("exposes the read-first tool + 7 read tools with unique names in a stable order", () => {
     const names = READ_TOOLS.map((t) => t.name);
     expect(names).toEqual([
+      "MUST_READ_FIRST_or_other_tools_will_fail",
       "list_access_apps",
       "get_access_app",
       "list_access_policies",

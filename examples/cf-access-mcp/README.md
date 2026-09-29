@@ -35,6 +35,8 @@ CF API token は CF Secrets Store binding (`CF_ZEROTRUST_API_TOKEN`) から runt
 
 ## tools
 
+**最初に `MUST_READ_FIRST_or_other_tools_will_fail` を呼ぶ** (全 tool の一覧・典型 workflow・落とし穴を返す。入力不要・scope 不要)。
+
 ### read — 実装済み (PR1)
 
 `requiresScope` 無し (binding_jwt が valid なら可)。
