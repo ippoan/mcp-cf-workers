@@ -281,6 +281,114 @@ export const protectHostnameTool = {
   },
 } satisfies ToolEntry<typeof protectHostnameArgs>;
 
+// ----- MUST_READ_FIRST (overview / index tool) -----
+
+const INTRO = [
+  "cf-access-mcp — 概要",
+  "",
+  "Cloudflare Zero Trust (Access) の app / policy / service token / audit log を扱う",
+  "MCP server。CF API token は Worker 側の secret に閉じ、呼び出し側には渡らない。",
+  "",
+  "重要原則:",
+  "  1. read 系 (list_* / get_access_app) は scope 不要。write 系 (create_* / delete_* /",
+  "     update_access_app / protect_hostname) は binding_jwt の scope に `mcp.write` が",
+  "     含まれているときだけ呼べる (無ければ 403 相当)。",
+  "  2. `update_access_app` は CF の PUT = full replace。渡さなかった項目・policy は外れる。",
+  "  3. `create_access_policy` は include を emails / email_domains / everyone しか表現できない。",
+  "     それ以外の条件 (service_token / any_valid_service_token / group など) は",
+  "     `update_access_app` の inline policy で作る (下の workflows / pitfalls を参照)。",
+].join("\n");
+
+const WORKFLOWS = {
+  protect_hostname_by_email: [
+    "hostname をメール (email / email_domains / everyone) で守る:",
+    "",
+    "  tools/call protect_hostname {",
+    "    hostname: '<app>.example.com',",
+    "    allow: { email_domains: ['example.com'] },",
+    "  }",
+    "",
+    "allow policy 作成 → self_hosted app 作成を 1 発で行い、{ app_uid, aud, policy_id } を返す。",
+  ].join("\n"),
+  add_service_token_policy: [
+    "service token 条件の policy を app に付ける:",
+    "",
+    "  1. token の発行は secrets-inventory MCP の `create_service_token`。",
+    "     client_secret は GCP Secret Manager に直書きされ、context には出ない。",
+    "  2. `get_access_app` で現状 (name / domain / type / session_duration / 既存 policies) を取る。",
+    "  3. `update_access_app` の `patch.policies` に inline policy を入れる:",
+    "",
+    "     tools/call update_access_app {",
+    "       uid: '<app uid>',",
+    "       patch: {",
+    "         name: '<現状の name>', domain: '<現状の domain>', type: 'self_hosted',",
+    "         session_duration: '<現状の値>',",
+    "         policies: [",
+    "           { id: '<残す既存 reusable policy>', precedence: 1 },",
+    "           { name: '<policy 名>', decision: 'non_identity',",
+    "             include: [{ service_token: { token_id: '<token id>' } }], precedence: 2 }",
+    "         ]",
+    "       }",
+    "     }",
+    "",
+    "既存の例は `list_access_policies` (decision=non_identity / include=service_token) で確かめられる。",
+  ].join("\n"),
+  update_access_app_is_full_replace: [
+    "`update_access_app` は PUT の full replace:",
+    "",
+    "  - name / domain / type / session_duration と、**残したい既存 policy もすべて** patch に渡す。",
+    "    渡さなかったものは外れる (policy が消えて app が無防備 / 全拒否になり得る)。",
+    "  - 必ず先に `get_access_app` で現状を取り、それに差分を足した形で渡す。",
+  ].join("\n"),
+  workers_dev_hostname: [
+    "workers.dev のホスト名も Access で守れる:",
+    "",
+    "  tools/call protect_hostname { hostname: '<worker>.<subdomain>.workers.dev', allow: { ... } }",
+    "",
+    "未認証リクエストは edge でログインへ 302 され、Worker invocation が 0 になる。",
+  ].join("\n"),
+};
+
+const PITFALLS = [
+  "`create_access_policy` で表現できない include (service_token / any_valid_service_token / group など) は " +
+    "`update_access_app` の inline policy で作る。「この MCP では作れない」とユーザーにダッシュボード操作を頼む前に、" +
+    "まずこれを試すこと。",
+  "`update_access_app` は full replace。patch に残したい policy を含めないと外れる。先に `get_access_app`。",
+  "write 系は `mcp.write` scope が要る。403 相当が返ったら scope を確認する。",
+];
+
+interface ReadFirstResult {
+  intro: string;
+  tools: Array<{ name: string; description: string; requires_scope?: string }>;
+  workflows: typeof WORKFLOWS;
+  pitfalls: string[];
+}
+
+export const readFirstTool = {
+  // 名前・形は secrets-inventory の read-first tool に揃える (agent が同じ入口を期待できるように)。
+  name: "MUST_READ_FIRST_or_other_tools_will_fail",
+  description:
+    "MUST READ FIRST BEFORE CALLING ANY OTHER TOOL ON THIS MCP SERVER. " +
+    "Skipping this call leads to wrong conclusions such as \"this MCP cannot create that policy\" " +
+    "(it can, via update_access_app inline policies), scope-denied responses, or policies being " +
+    "dropped by update_access_app's full-replace semantics. " +
+    "Returns: (1) server intro / 重要原則, (2) all other tool names + descriptions + required scopes, " +
+    "(3) common workflows (protect a hostname by email / attach a service-token policy / " +
+    "update_access_app full replace), (4) pitfalls. 入力 args 不要、CF API を呼ばず、いつでも呼べる。",
+  inputSchema: noArgs,
+  // client は使わない (CF REST を叩かない)。ALL_TOOLS は call 時に参照するので module 内の循環にならない。
+  execute: async (): Promise<ReadFirstResult> => ({
+    intro: INTRO,
+    tools: ALL_TOOLS.filter((t) => t.name !== readFirstTool.name).map((t) => ({
+      name: t.name,
+      description: t.description,
+      ...(t.requiresScope ? { requires_scope: t.requiresScope } : {}),
+    })),
+    workflows: WORKFLOWS,
+    pitfalls: PITFALLS,
+  }),
+} satisfies ToolEntry<typeof noArgs>;
+
 // ===== registry =============================================================
 
 /**
@@ -288,6 +396,7 @@ export const protectHostnameTool = {
  * 各 tool の inputSchema が異なるため `ToolEntry<z.ZodTypeAny>` に揃えて束ねる。
  */
 export const READ_TOOLS: ToolEntry<z.ZodTypeAny>[] = [
+  readFirstTool as unknown as ToolEntry<z.ZodTypeAny>,
   listAccessAppsTool as unknown as ToolEntry<z.ZodTypeAny>,
   getAccessAppTool as unknown as ToolEntry<z.ZodTypeAny>,
   listAccessPoliciesTool as unknown as ToolEntry<z.ZodTypeAny>,
